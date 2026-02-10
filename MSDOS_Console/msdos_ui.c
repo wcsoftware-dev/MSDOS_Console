@@ -268,8 +268,15 @@ int main(void) {
                 else if (cur_pane == PANE_TASKS) { if (task_sel < MAX_ITEMS-1) task_sel++; }
             }
         } else {
-            if (ch == 9) { // Tab - switch pane
-                cur_pane = (Pane)((cur_pane + 1) % 4);
+            if (ch == 9) { // Tab - switch pane (Shift+Tab to go backward)
+                SHORT shiftState = GetAsyncKeyState(VK_SHIFT);
+                if (shiftState & 0x8000) {
+                    // Shift is down: move focus backward
+                    cur_pane = (Pane)((cur_pane + 4 - 1) % 4);
+                } else {
+                    // Normal Tab: move focus forward
+                    cur_pane = (Pane)((cur_pane + 1) % 4);
+                }
             } else if (ch == 13) { // Enter
                 // If directory pane focused, change directory to selected dir
                 if (cur_pane == PANE_DIR) {
