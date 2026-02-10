@@ -19,6 +19,14 @@ typedef struct {
 
 static HANDLE hConsole;
 
+// Pane focus and selections
+typedef enum { PANE_DIR = 0, PANE_FILES = 1, PANE_MAIN = 2, PANE_TASKS = 3 } Pane;
+static Pane cur_pane = PANE_DIR;
+static int dir_sel = 0;
+static int file_sel = 0;
+static int main_sel = 0;
+static int task_sel = 0;
+
 // Console color helpers
 enum {
     ATTR_BG_BLUE = BACKGROUND_BLUE,
@@ -146,7 +154,7 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     int dt_max = (mid_y - 1) - dt_y + 1;
     for (int i = 0; i < dt_max && i < dcount; ++i) {
         int idx = dir_idx[i];
-        WORD attr = (strcmp(items[sel].name, items[idx].name) == 0) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        WORD attr = (cur_pane == PANE_DIR && i == dir_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
         char line[512];
         snprintf(line, sizeof(line), "  [%c] %s", 'D', items[idx].name);
         // truncate to left width
@@ -161,7 +169,7 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     for (int i = 0; i < fl_max && i < fcount; ++i) {
         int idx = file_idx[i];
         FileItem *it = &items[idx];
-        WORD attr = (strcmp(items[sel].name, it->name) == 0) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        WORD attr = (cur_pane == PANE_FILES && i == file_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
         char line[1024];
         char dt[64] = "";
         if (it->mtime.wYear != 0) {
@@ -186,7 +194,8 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     const char *main_items[] = { "Command Prompt", "Editor", "MS-DOS QBasic", "Disk Utilities" };
     int main_count = sizeof(main_items)/sizeof(main_items[0]);
     for (int i = 0; i < bottom_h && i < main_count; ++i) {
-        put_text(1, mid_y+2 + i, main_items[i], ATTR_WHITE_ON_BLUE);
+        WORD attr = (cur_pane == PANE_MAIN && i == main_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        put_text(1, mid_y+2 + i, main_items[i], attr);
     }
 
     // Bottom-right: Active Task List
@@ -194,7 +203,7 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     const char *tasks[] = { "Command Prompt" };
     int tcount = 1;
     for (int i = 0; i < bottom_h && i < tcount; ++i) {
-        WORD attr = (i == 0) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        WORD attr = (cur_pane == PANE_TASKS && i == task_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
         put_text(mid_x+2, mid_y+2 + i, tasks[i], attr);
     }
 
@@ -236,34 +245,51 @@ int main(void) {
         if (ch == 0 || ch == 0xE0) {
             int ch2 = _getch();
             if (ch2 == 72) { // up
-                if (sel > 0) sel--;
+                if (cur_pane == PANE_DIR) { if (dir_sel > 0) dir_sel--; }
+                else if (cur_pane == PANE_FILES) { if (file_sel > 0) file_sel--; }
+                else if (cur_pane == PANE_MAIN) { if (main_sel > 0) main_sel--; }
+                else if (cur_pane == PANE_TASKS) { if (task_sel > 0) task_sel--; }
             } else if (ch2 == 80) { // down
-                if (sel < count - 1) sel++;
+                if (cur_pane == PANE_DIR) { if (dir_sel < MAX_ITEMS-1) dir_sel++; }
+                else if (cur_pane == PANE_FILES) { if (file_sel < MAX_ITEMS-1) file_sel++; }
+                else if (cur_pane == PANE_MAIN) { if (main_sel < MAX_ITEMS-1) main_sel++; }
+                else if (cur_pane == PANE_TASKS) { if (task_sel < MAX_ITEMS-1) task_sel++; }
             }
         } else {
-            if (ch == 13) { // Enter
-                if (count > 0 && items[sel].is_dir) {
-                    char newpath[MAX_PATH];
-                    if (strcmp(items[sel].name, "..") == 0) {
-                        SetCurrentDirectoryA("..");
-                    } else {
-                        snprintf(newpath, sizeof(newpath), "%s\\%s", cwd, items[sel].name);
-                        SetCurrentDirectoryA(newpath);
+            if (ch == 9) { // Tab - switch pane
+                cur_pane = (Pane)((cur_pane + 1) % 4);
+            } else if (ch == 13) { // Enter
+                // If directory pane focused, change directory to selected dir
+                if (cur_pane == PANE_DIR) {
+                    // build dirs list to map dir_sel to items
+                    int dcount = 0;
+                    int dir_idx[MAX_ITEMS];
+                    for (int i = 0; i < count; ++i) if (items[i].is_dir) dir_idx[dcount++] = i;
+                    if (dcount > 0 && dir_sel < dcount) {
+                        const char *dname = items[dir_idx[dir_sel]].name;
+                        if (strcmp(dname, "..") == 0) SetCurrentDirectoryA("..");
+                        else {
+                            char newpath[MAX_PATH];
+                            snprintf(newpath, sizeof(newpath), "%s\\%s", cwd, dname);
+                            SetCurrentDirectoryA(newpath);
+                        }
+                        GetCurrentDirectoryA(MAX_PATH, cwd);
+                        load_directory(cwd, items, &count);
+                        dir_sel = 0; file_sel = 0;
                     }
-                    GetCurrentDirectoryA(MAX_PATH, cwd);
-                    load_directory(cwd, items, &count);
-                    sel = 0;
+                } else if (cur_pane == PANE_FILES) {
+                    // (placeholder) open file: do nothing for now
                 }
             } else if (ch == 8) { // Backspace
                 SetCurrentDirectoryA("..");
                 GetCurrentDirectoryA(MAX_PATH, cwd);
                 load_directory(cwd, items, &count);
-                sel = 0;
+                dir_sel = 0; file_sel = 0;
             } else if (ch == 'q' || ch == 'Q') {
                 running = 0;
             }
         }
-        draw_ui(cwd, items, count, sel);
+        draw_ui(cwd, items, count, 0);
     }
 
     // Restore cursor before exit
