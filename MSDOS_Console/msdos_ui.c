@@ -26,6 +26,8 @@ static int dir_sel = 0;
 static int file_sel = 0;
 static int main_sel = 0;
 static int task_sel = 0;
+static int dir_offset = 0;
+static int file_offset = 0;
 
 // Console color helpers
 enum {
@@ -164,9 +166,15 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     put_text(1, content_top, "Directory Tree", ATTR_WHITE_ON_BLUE);
     int dt_y = content_top + 1;
     int dt_max = (mid_y - 1) - dt_y + 1;
-    for (int i = 0; i < dt_max && i < dcount; ++i) {
-        int idx = dir_idx[i];
-        WORD attr = (cur_pane == PANE_DIR && i == dir_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+    // apply dir_offset for scrolling
+    int visible_dirs = dt_max;
+    if (visible_dirs < 0) visible_dirs = 0;
+    if (dir_offset < 0) dir_offset = 0;
+    if (dir_offset > dcount - visible_dirs) dir_offset = dcount - visible_dirs;
+    if (dir_offset < 0) dir_offset = 0;
+    for (int i = 0; i < visible_dirs && (i + dir_offset) < dcount; ++i) {
+        int idx = dir_idx[i + dir_offset];
+        WORD attr = (cur_pane == PANE_DIR && i == dir_sel - dir_offset) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
         char line[512];
         snprintf(line, sizeof(line), "  [%c] %s", 'D', items[idx].name);
         // truncate to left width
@@ -178,10 +186,15 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     put_text(mid_x+2, content_top, "Files", ATTR_WHITE_ON_BLUE);
     int fl_y = content_top + 1;
     int fl_max = (mid_y - 1) - fl_y + 1;
-    for (int i = 0; i < fl_max && i < fcount; ++i) {
-        int idx = file_idx[i];
+    int visible_files = fl_max;
+    if (visible_files < 0) visible_files = 0;
+    if (file_offset < 0) file_offset = 0;
+    if (file_offset > fcount - visible_files) file_offset = fcount - visible_files;
+    if (file_offset < 0) file_offset = 0;
+    for (int i = 0; i < visible_files && (i + file_offset) < fcount; ++i) {
+        int idx = file_idx[i + file_offset];
         FileItem *it = &items[idx];
-        WORD attr = (cur_pane == PANE_FILES && i == file_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        WORD attr = (cur_pane == PANE_FILES && i == file_sel - file_offset) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
         char line[1024];
         char dt[64] = "";
         if (it->mtime.wYear != 0) {
@@ -256,15 +269,38 @@ int main(void) {
         int ch = _getch();
         if (ch == 0 || ch == 0xE0) {
             int ch2 = _getch();
+            /* compute visible rows for top panes */
+            COORD size = get_console_size();
+            int w = size.X, h = size.Y;
+            int content_top = 3;
+            int content_bottom = h - 2;
+            int content_h = content_bottom - content_top + 1;
+            int top_h = content_h / 2;
+            int visible_lines = top_h - 1; if (visible_lines < 0) visible_lines = 0;
+
+            /* count dirs/files */
+            int dcount = 0, fcount = 0;
+            for (int i = 0; i < count; ++i) { if (items[i].is_dir) dcount++; else fcount++; }
+
             if (ch2 == 72) { // up
-                if (cur_pane == PANE_DIR) { if (dir_sel > 0) dir_sel--; }
-                else if (cur_pane == PANE_FILES) { if (file_sel > 0) file_sel--; }
-                else if (cur_pane == PANE_MAIN) { if (main_sel > 0) main_sel--; }
+                if (cur_pane == PANE_DIR) {
+                    if (dir_sel > 0) dir_sel--;
+                    if (dir_sel < dir_offset) dir_offset = dir_sel;
+                    if (dir_sel < 0) dir_sel = 0;
+                } else if (cur_pane == PANE_FILES) {
+                    if (file_sel > 0) file_sel--;
+                    if (file_sel < file_offset) file_offset = file_sel;
+                    if (file_sel < 0) file_sel = 0;
+                } else if (cur_pane == PANE_MAIN) { if (main_sel > 0) main_sel--; }
                 else if (cur_pane == PANE_TASKS) { if (task_sel > 0) task_sel--; }
             } else if (ch2 == 80) { // down
-                if (cur_pane == PANE_DIR) { if (dir_sel < MAX_ITEMS-1) dir_sel++; }
-                else if (cur_pane == PANE_FILES) { if (file_sel < MAX_ITEMS-1) file_sel++; }
-                else if (cur_pane == PANE_MAIN) { if (main_sel < MAX_ITEMS-1) main_sel++; }
+                if (cur_pane == PANE_DIR) {
+                    if (dir_sel < dcount - 1) dir_sel++;
+                    if (dir_sel >= dir_offset + visible_lines) dir_offset = dir_sel - visible_lines + 1;
+                } else if (cur_pane == PANE_FILES) {
+                    if (file_sel < fcount - 1) file_sel++;
+                    if (file_sel >= file_offset + visible_lines) file_offset = file_sel - visible_lines + 1;
+                } else if (cur_pane == PANE_MAIN) { if (main_sel < MAX_ITEMS-1) main_sel++; }
                 else if (cur_pane == PANE_TASKS) { if (task_sel < MAX_ITEMS-1) task_sel++; }
             }
         } else {
