@@ -13,6 +13,8 @@
 typedef struct {
     char name[MAX_NAME];
     BOOL is_dir;
+    unsigned long long size;
+    SYSTEMTIME mtime;
 } FileItem;
 
 static HANDLE hConsole;
@@ -22,7 +24,9 @@ enum {
     ATTR_BG_BLUE = BACKGROUND_BLUE,
     ATTR_WHITE_ON_BLUE = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | ATTR_BG_BLUE,
     ATTR_YELLOW_ON_BLUE = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY | ATTR_BG_BLUE,
-    ATTR_STATUS = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | ATTR_BG_BLUE
+    ATTR_STATUS = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | ATTR_BG_BLUE,
+    /* Black text on bright yellow background for selection (classic DOS highlight) */
+    ATTR_HILITE = BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_INTENSITY
 };
 
 static COORD get_console_size() {
@@ -65,6 +69,20 @@ static void load_directory(const char* path, FileItem* items, int* count) {
         strncpy_s(it->name, MAX_NAME, fd.cFileName, MAX_NAME-1);
         it->name[MAX_NAME-1] = 0;
         it->is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        it->size = 0;
+        ZeroMemory(&it->mtime, sizeof(it->mtime));
+
+        /* Get size and last write time */
+        char full[MAX_PATH];
+        snprintf(full, sizeof(full), "%s\\%s", path, fd.cFileName);
+        WIN32_FILE_ATTRIBUTE_DATA fad;
+        if (GetFileAttributesExA(full, GetFileExInfoStandard, &fad)) {
+            it->size = ((unsigned long long)fad.nFileSizeHigh << 32) | fad.nFileSizeLow;
+            FILETIME localFt;
+            FileTimeToLocalFileTime(&fad.ftLastWriteTime, &localFt);
+            FileTimeToSystemTime(&localFt, &it->mtime);
+        }
+
         if (*count >= MAX_ITEMS) break;
     } while (FindNextFileA(hFind, &fd));
     FindClose(hFind);
@@ -73,23 +91,111 @@ static void load_directory(const char* path, FileItem* items, int* count) {
 static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     COORD size = get_console_size();
     int w = size.X, h = size.Y;
-    int list_h = h - 2; // leave bottom line for status
-    // Clear and set background
+    // Clear whole screen
     for (int y = 0; y < h; ++y) fill_line(y, ATTR_WHITE_ON_BLUE, w);
 
-    // Title
-    char title[512];
-    snprintf(title, sizeof(title), " MS-DOS Style File Manager - %s ", cwd);
-    put_text(0, 0, title, ATTR_WHITE_ON_BLUE);
+    // Title bar (line 0)
+    char title[256];
+    snprintf(title, sizeof(title), " MS-DOS Shell ");
+    int title_x = (w > (int)strlen(title)) ? (w/2 - (int)strlen(title)/2) : 0;
+    put_text(0, 0, "", ATTR_WHITE_ON_BLUE);
+    put_text(title_x, 0, title, ATTR_WHITE_ON_BLUE);
 
-    // File list
-    for (int i = 0; i < list_h - 1 && i < count; ++i) {
-        WORD attr = (i == sel) ? ATTR_YELLOW_ON_BLUE : ATTR_WHITE_ON_BLUE;
+    // Menu bar (line 1)
+    put_text(0, 1, " File  Options  View  Help", ATTR_WHITE_ON_BLUE);
+
+    // Path bar (line 2)
+    char pathbar[1024];
+    snprintf(pathbar, sizeof(pathbar), " %s", cwd);
+    put_text(0, 2, pathbar, ATTR_WHITE_ON_BLUE);
+
+    // Content area from line 3 to h-2 (reserve last line for status)
+    int content_top = 3;
+    int content_bottom = h - 2;
+    int content_h = content_bottom - content_top + 1;
+
+    // Split vertically: left = 1/3, right = 2/3
+    int left_w = w / 3;
+    int mid_x = left_w;
+    int right_w = w - left_w - 1;
+
+    // Split horizontally in content: top and bottom panes
+    int top_h = content_h / 2;
+    int bottom_h = content_h - top_h - 1; // leave one line for horizontal divider
+    int mid_y = content_top + top_h;
+
+    // Draw vertical divider
+    for (int y = content_top; y <= content_bottom; ++y) {
+        put_text(mid_x, y, "|", ATTR_WHITE_ON_BLUE);
+    }
+    // Draw horizontal divider
+    for (int x = 0; x < w; ++x) put_text(x, mid_y, "-", ATTR_WHITE_ON_BLUE);
+
+    // Build lists of dirs and files
+    int dir_idx[MAX_ITEMS];
+    int file_idx[MAX_ITEMS];
+    int dcount = 0, fcount = 0;
+    for (int i = 0; i < count; ++i) {
+        if (items[i].is_dir) dir_idx[dcount++] = i;
+        else file_idx[fcount++] = i;
+    }
+
+    // Left-top: Directory Tree (content_top .. mid_y-1, x 0..mid_x-1)
+    put_text(1, content_top, "Directory Tree", ATTR_WHITE_ON_BLUE);
+    int dt_y = content_top + 1;
+    int dt_max = (mid_y - 1) - dt_y + 1;
+    for (int i = 0; i < dt_max && i < dcount; ++i) {
+        int idx = dir_idx[i];
+        WORD attr = (strcmp(items[sel].name, items[idx].name) == 0) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        char line[512];
+        snprintf(line, sizeof(line), "  [%c] %s", 'D', items[idx].name);
+        // truncate to left width
+        if ((int)strlen(line) > left_w-2) line[left_w-2] = '\0';
+        put_text(1, dt_y + i, line, attr);
+    }
+
+    // Right-top: File list (content_top .. mid_y-1, x mid_x+1 .. w-1)
+    put_text(mid_x+2, content_top, "Files", ATTR_WHITE_ON_BLUE);
+    int fl_y = content_top + 1;
+    int fl_max = (mid_y - 1) - fl_y + 1;
+    for (int i = 0; i < fl_max && i < fcount; ++i) {
+        int idx = file_idx[i];
+        FileItem *it = &items[idx];
+        WORD attr = (strcmp(items[sel].name, it->name) == 0) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
         char line[1024];
-        snprintf(line, sizeof(line), " %c %s", items[i].is_dir ? 'D' : ' ', items[i].name);
-        // Truncate to width
-        if ((int)strlen(line) > w) line[w] = 0;
-        put_text(0, i + 1, line, attr);
+        char dt[64] = "";
+        if (it->mtime.wYear != 0) {
+            int hour = it->mtime.wHour;
+            int hour12 = hour % 12; if (hour12 == 0) hour12 = 12;
+            const char *ampm = (hour >= 12) ? "PM" : "AM";
+            snprintf(dt, sizeof(dt), "%02d/%02d/%04d %02d:%02d %s",
+                     it->mtime.wMonth, it->mtime.wDay, it->mtime.wYear,
+                     hour12, it->mtime.wMinute, ampm);
+        }
+        char sizebuf[32] = "";
+        if (!it->is_dir) snprintf(sizebuf, sizeof(sizebuf), "%10llu", it->size);
+        snprintf(line, sizeof(line), "%s %s %s", dt, sizebuf, it->name);
+        // truncate to right width
+        int available = w - (mid_x + 3);
+        if ((int)strlen(line) > available) line[available] = '\0';
+        put_text(mid_x+2, fl_y + i, line, attr);
+    }
+
+    // Bottom-left: Main (content mid_y+1 .. content_bottom)
+    put_text(1, mid_y+1, "Main", ATTR_WHITE_ON_BLUE);
+    const char *main_items[] = { "Command Prompt", "Editor", "MS-DOS QBasic", "Disk Utilities" };
+    int main_count = sizeof(main_items)/sizeof(main_items[0]);
+    for (int i = 0; i < bottom_h && i < main_count; ++i) {
+        put_text(1, mid_y+2 + i, main_items[i], ATTR_WHITE_ON_BLUE);
+    }
+
+    // Bottom-right: Active Task List
+    put_text(mid_x+2, mid_y+1, "Active Task List", ATTR_WHITE_ON_BLUE);
+    const char *tasks[] = { "Command Prompt" };
+    int tcount = 1;
+    for (int i = 0; i < bottom_h && i < tcount; ++i) {
+        WORD attr = (i == 0) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        put_text(mid_x+2, mid_y+2 + i, tasks[i], attr);
     }
 
     // Status bar at bottom
