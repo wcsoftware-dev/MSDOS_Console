@@ -148,6 +148,18 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
         else file_idx[fcount++] = i;
     }
 
+    /* Clamp per-pane selections to available counts to avoid overflow */
+    if (dcount == 0) dir_sel = 0;
+    else if (dir_sel >= dcount) dir_sel = dcount - 1;
+
+    if (fcount == 0) file_sel = 0;
+    else if (file_sel >= fcount) file_sel = fcount - 1;
+
+    const int MAIN_COUNT_CONST = 4; /* Command Prompt, Editor, QBasic, Disk Utilities */
+    const int TASKS_COUNT_CONST = 1; /* Active tasks count */
+    if (main_sel >= MAIN_COUNT_CONST) main_sel = MAIN_COUNT_CONST - 1;
+    if (task_sel >= TASKS_COUNT_CONST) task_sel = TASKS_COUNT_CONST - 1;
+
     // Left-top: Directory Tree (content_top .. mid_y-1, x 0..mid_x-1)
     put_text(1, content_top, "Directory Tree", ATTR_WHITE_ON_BLUE);
     int dt_y = content_top + 1;
