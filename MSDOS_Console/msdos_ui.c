@@ -1,4 +1,4 @@
-// msdos_ui.c - Minimal MS-DOS style terminal file manager (Windows console, C)
+﻿// msdos_ui.c - Minimal MS-DOS style terminal file manager (Windows console, C)
 // Compile in Visual Studio as a C file (set /TC) or use: cl /W4 /TC msdos_ui.c
 
 #include <windows.h>
@@ -104,11 +104,21 @@ enum {
     ATTR_WHITE_ON_BLUE = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | ATTR_BG_BLUE,
     ATTR_YELLOW_ON_BLUE = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY | ATTR_BG_BLUE,
     /* Bright green track on blue background for scrollbars */
-    ATTR_SCROLL = FOREGROUND_GREEN | FOREGROUND_INTENSITY | ATTR_BG_BLUE,
+    /* scrollbar color (no background so panes are transparent) */
+    ATTR_SCROLL = FOREGROUND_GREEN | FOREGROUND_INTENSITY,
     ATTR_STATUS = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | ATTR_BG_BLUE,
+    /* White text on the same grey background used by the menu */
+    ATTR_MENU_BAR = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE,
     /* Black text on bright yellow background for selection (classic DOS highlight) */
-    ATTR_HILITE = BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_INTENSITY
+    ATTR_HILITE = BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_INTENSITY,
+    /* Grey/white background for pane headers (black text on bright background) */
+    ATTR_HDR = BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE | BACKGROUND_INTENSITY
+    ,
+    /* White text on purple background for focused pane headers (use non-bright background to avoid pink) */
+    ATTR_WHITE_ON_PURPLE = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | BACKGROUND_RED | BACKGROUND_BLUE
 };
+/* Default foreground on console background (no background color) */
+#define ATTR_DEFAULT (FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE)
 
 static COORD get_console_size() {
     CONSOLE_SCREEN_BUFFER_INFO sbi;
@@ -176,12 +186,12 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     CHAR_INFO *buf = (CHAR_INFO*)malloc(sizeof(CHAR_INFO) * total);
     if (!buf) return;
 
-    // fill background
+    // fill background: remove solid pane background so underlying console background shows
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             int idx = y * w + x;
             buf[idx].Char.AsciiChar = ' ';
-            buf[idx].Attributes = ATTR_WHITE_ON_BLUE;
+            buf[idx].Attributes = ATTR_DEFAULT; /* no background color */
         }
     }
 
@@ -209,14 +219,20 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     char title[256]; snprintf(title, sizeof(title), " MS-DOS Shell ");
     int title_x = (w > (int)strlen(title)) ? (w/2 - (int)strlen(title)/2) : 0;
     BUF_PUT_TEXT(title_x, 0, title, ATTR_WHITE_ON_BLUE);
-    BUF_PUT_TEXT(0, 1, " File  Options  View  Help", ATTR_WHITE_ON_BLUE);
-    char pathbar[1024]; snprintf(pathbar, sizeof(pathbar), " %s", cwd); BUF_PUT_TEXT(0, 2, pathbar, ATTR_WHITE_ON_BLUE);
+    // menu/file bar (use grey background to match menu dropdown)
+    WORD menuBg = (WORD)(BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE);
+    /* black text on grey background */
+    WORD menuTextAttr = (WORD)(menuBg);
+    // fill the two bar lines with the grey background first
+    for (int x = 0; x < w; ++x) { int idx1 = 1 * w + x; buf[idx1].Char.AsciiChar = ' '; buf[idx1].Attributes = menuBg; int idx2 = 2 * w + x; buf[idx2].Char.AsciiChar = ' '; buf[idx2].Attributes = menuBg; }
+    BUF_PUT_TEXT(0, 1, " File  Options  View  Help", menuTextAttr);
+    char pathbar[1024]; snprintf(pathbar, sizeof(pathbar), " %s", cwd); BUF_PUT_TEXT(0, 2, pathbar, menuTextAttr);
 
     // pane header focus attributes
-    WORD attr_dir_hdr = (cur_pane == PANE_DIR) ? ATTR_YELLOW_ON_BLUE : ATTR_WHITE_ON_BLUE;
-    WORD attr_files_hdr = (cur_pane == PANE_FILES) ? ATTR_YELLOW_ON_BLUE : ATTR_WHITE_ON_BLUE;
-    WORD attr_main_hdr = (cur_pane == PANE_MAIN) ? ATTR_YELLOW_ON_BLUE : ATTR_WHITE_ON_BLUE;
-    WORD attr_tasks_hdr = (cur_pane == PANE_TASKS) ? ATTR_YELLOW_ON_BLUE : ATTR_WHITE_ON_BLUE;
+    WORD attr_dir_hdr = (cur_pane == PANE_DIR) ? ATTR_WHITE_ON_PURPLE : ATTR_HDR;
+    WORD attr_files_hdr = (cur_pane == PANE_FILES) ? ATTR_WHITE_ON_PURPLE : ATTR_HDR;
+    WORD attr_main_hdr = (cur_pane == PANE_MAIN) ? ATTR_WHITE_ON_PURPLE : ATTR_HDR;
+    WORD attr_tasks_hdr = (cur_pane == PANE_TASKS) ? ATTR_WHITE_ON_PURPLE : ATTR_HDR;
 
     // Menu positions
     int menu_file_x = 1;
@@ -224,14 +240,14 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
 
     /* menu is drawn after the main content so it appears above panes */
 
-    // dividers (use box-drawing characters)
-    char ver_ch[2] = { (char)179, 0 }; /* ? */
-    char hor_ch[2] = { (char)196, 0 }; /* ? */
-    char cross_ch[2] = { (char)197, 0 }; /* ? */
-    for (int y = content_top; y <= content_bottom; ++y) BUF_PUT_TEXT(mid_x, y, ver_ch, ATTR_WHITE_ON_BLUE);
+    // dividers (use box-drawing characters) - draw with default foreground so no background fills
+    char ver_ch[2] = { (char)179, 0 }; /* │ */
+    char hor_ch[2] = { (char)196, 0 }; /* ─ */
+    char cross_ch[2] = { (char)197, 0 }; /* ┼ */
+    for (int y = content_top; y <= content_bottom; ++y) BUF_PUT_TEXT(mid_x, y, ver_ch, ATTR_DEFAULT);
     for (int x = 0; x < w; ++x) {
-        if (x == mid_x) BUF_PUT_TEXT(x, mid_y, cross_ch, ATTR_WHITE_ON_BLUE);
-        else BUF_PUT_TEXT(x, mid_y, hor_ch, ATTR_WHITE_ON_BLUE);
+        if (x == mid_x) BUF_PUT_TEXT(x, mid_y, cross_ch, ATTR_DEFAULT);
+        else BUF_PUT_TEXT(x, mid_y, hor_ch, ATTR_DEFAULT);
     }
 
     // Build lists
@@ -304,12 +320,12 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
             }
         }
         /* draw border using box-drawing characters (CP437) */
-        char tl[2] = { (char)201, 0 }; /* ? */
-        char tr[2] = { (char)187, 0 }; /* ? */
-        char bl[2] = { (char)200, 0 }; /* ? */
-        char br[2] = { (char)188, 0 }; /* ? */
-        char hor[2] = { (char)205, 0 }; /* ? */
-        char ver[2] = { (char)186, 0 }; /* ? */
+        char tl[2] = { (char)201, 0 }; /* ╔ */
+        char tr[2] = { (char)187, 0 }; /* ╗ */
+        char bl[2] = { (char)200, 0 }; /* ╚ */
+        char br[2] = { (char)188, 0 }; /* ╝ */
+        char hor[2] = { (char)205, 0 }; /* ═ */
+        char ver[2] = { (char)186, 0 }; /* ║ */
         BUF_PUT_TEXT(left, top, tl, borderAttr);
         BUF_PUT_TEXT(right, top, tr, borderAttr);
         BUF_PUT_TEXT(left, bottom, bl, borderAttr);
