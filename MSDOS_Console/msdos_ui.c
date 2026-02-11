@@ -217,7 +217,7 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     int bottom_h = content_h - top_h - 1; // lines available for bottom panes
 
     // title/menu/path
-    char title[256]; snprintf(title, sizeof(title), " MS-DOS Shell ");
+    char title[256]; snprintf(title, sizeof(title), " WC-DOS-Like Shell ");
     int title_x = (w > (int)strlen(title)) ? (w/2 - (int)strlen(title)/2) : 0;
     /* fill entire title bar row with blue background and write white-on-blue title */
     for (int x = 0; x < w; ++x) {
