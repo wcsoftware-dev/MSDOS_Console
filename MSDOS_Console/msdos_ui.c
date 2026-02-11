@@ -21,6 +21,62 @@ static HANDLE hConsole;
 static HANDLE hInput;
 static DWORD prevInputMode;
 
+/* forward declare selection globals so restore/save functions can reference them
+   even if the globals are defined later in the file */
+extern int dir_sel;
+extern int file_sel;
+extern int dir_offset;
+extern int file_offset;
+
+// Remember selection per-directory so selection is restored when returning
+#define MAX_SEL_STATES 128
+typedef struct {
+    char path[MAX_PATH];
+    int dir_sel, file_sel;
+    int dir_offset, file_offset;
+} SelState;
+static SelState sel_states[MAX_SEL_STATES];
+static int sel_state_count = 0;
+
+static void save_selection_for_path(const char *path, int dsel, int fsel, int doff, int foff) {
+    if (!path) return;
+    for (int i = 0; i < sel_state_count; ++i) {
+        if (_stricmp(sel_states[i].path, path) == 0) {
+            sel_states[i].dir_sel = dsel;
+            sel_states[i].file_sel = fsel;
+            sel_states[i].dir_offset = doff;
+            sel_states[i].file_offset = foff;
+            return;
+        }
+    }
+    if (sel_state_count >= MAX_SEL_STATES) return;
+    strncpy_s(sel_states[sel_state_count].path, MAX_PATH, path, _TRUNCATE);
+    sel_states[sel_state_count].dir_sel = dsel;
+    sel_states[sel_state_count].file_sel = fsel;
+    sel_states[sel_state_count].dir_offset = doff;
+    sel_states[sel_state_count].file_offset = foff;
+    sel_state_count++;
+}
+
+static void restore_selection_for_path(const char *path, int dcount, int fcount) {
+    if (!path) return;
+    for (int i = 0; i < sel_state_count; ++i) {
+        if (_stricmp(sel_states[i].path, path) == 0) {
+            dir_sel = sel_states[i].dir_sel;
+            file_sel = sel_states[i].file_sel;
+            dir_offset = sel_states[i].dir_offset;
+            file_offset = sel_states[i].file_offset;
+            if (dcount == 0) { dir_sel = 0; dir_offset = 0; }
+            else if (dir_sel >= dcount) dir_sel = dcount - 1;
+            if (fcount == 0) { file_sel = 0; file_offset = 0; }
+            else if (file_sel >= fcount) file_sel = fcount - 1;
+            return;
+        }
+    }
+    // not found -> reset
+    dir_sel = 0; file_sel = 0; dir_offset = 0; file_offset = 0;
+}
+
 // Pane focus and selections
 typedef enum { PANE_DIR = 0, PANE_FILES = 1, PANE_MAIN = 2, PANE_TASKS = 3 } Pane;
 static Pane cur_pane = PANE_DIR;
@@ -274,6 +330,12 @@ int main(void) {
     int count = 0;
     int sel = 0;
     load_directory(cwd, items, &count);
+    // restore any previous selection state for this path
+    {
+        int dcount = 0, fcount = 0;
+        for (int i = 0; i < count; ++i) if (items[i].is_dir) dcount++; else fcount++;
+        restore_selection_for_path(cwd, dcount, fcount);
+    }
 
     draw_ui(cwd, items, count, sel);
 
@@ -359,11 +421,16 @@ int main(void) {
                     for (int i = 0; i < count; ++i) if (items[i].is_dir) dir_idx2[dcount2++] = i;
                     if (dcount2 > 0 && dir_sel < dcount2) {
                         const char *dname = items[dir_idx2[dir_sel]].name;
+                        // save current selection for cwd
+                        save_selection_for_path(cwd, dir_sel, file_sel, dir_offset, file_offset);
                         if (strcmp(dname, "..") == 0) SetCurrentDirectoryA("..");
                         else { char newpath[MAX_PATH]; snprintf(newpath, sizeof(newpath), "%s\\%s", cwd, dname); SetCurrentDirectoryA(newpath); }
                         GetCurrentDirectoryA(MAX_PATH, cwd);
                         load_directory(cwd, items, &count);
-                        dir_sel = 0; file_sel = 0; dir_offset = 0; file_offset = 0;
+                        // restore selection for new cwd if any
+                        int dcount_new = 0, fcount_new = 0;
+                        for (int i = 0; i < count; ++i) if (items[i].is_dir) dcount_new++; else fcount_new++;
+                        restore_selection_for_path(cwd, dcount_new, fcount_new);
                     }
                 }
             } else if (ch == 'q' || ch == 'Q') {
