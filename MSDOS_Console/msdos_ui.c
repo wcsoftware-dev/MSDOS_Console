@@ -281,7 +281,7 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     int dt_y = content_top + 1; int dt_max = (mid_y - 1) - dt_y + 1; int visible_dirs = dt_max; if (visible_dirs < 0) visible_dirs = 0;
     if (dir_offset < 0) dir_offset = 0; if (dir_offset > dcount - visible_dirs) dir_offset = dcount - visible_dirs; if (dir_offset < 0) dir_offset = 0;
     for (int i = 0; i < visible_dirs && (i + dir_offset) < dcount; ++i) {
-        int idx = dir_idx[i + dir_offset]; WORD attr = (cur_pane == PANE_DIR && (i + dir_offset) == dir_sel) ? (ATTR_HILITE | ATTR_DEFAULT) : ATTR_DEFAULT;
+        int idx = dir_idx[i + dir_offset]; WORD attr = (cur_pane == PANE_DIR && (i + dir_offset) == dir_sel) ? (ATTR_HILITE) : ATTR_DEFAULT;
         char line[512]; snprintf(line,sizeof(line),"  [%c] %s", 'D', items[idx].name); if ((int)strlen(line) > left_w-2) line[left_w-2] = '\0'; BUF_PUT_TEXT(1, dt_y + i, line, attr);
     }
 
@@ -303,7 +303,7 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     int fl_y = content_top + 1; int fl_max = (mid_y - 1) - fl_y + 1; int visible_files = fl_max; if (visible_files < 0) visible_files = 0;
     if (file_offset < 0) file_offset = 0; if (file_offset > fcount - visible_files) file_offset = fcount - visible_files; if (file_offset < 0) file_offset = 0;
     for (int i = 0; i < visible_files && (i + file_offset) < fcount; ++i) {
-        int idx = file_idx[i + file_offset]; FileItem *it = &items[idx]; WORD attr = (cur_pane == PANE_FILES && (i + file_offset) == file_sel) ? (ATTR_HILITE | ATTR_DEFAULT) : ATTR_DEFAULT;
+        int idx = file_idx[i + file_offset]; FileItem *it = &items[idx]; WORD attr = (cur_pane == PANE_FILES && (i + file_offset) == file_sel) ? (ATTR_HILITE) : ATTR_DEFAULT;
         char line[1024]; char dt[64] = ""; if (it->mtime.wYear != 0) { int hour = it->mtime.wHour; int hour12 = hour % 12; if (hour12 == 0) hour12 = 12; const char *ampm = (hour >= 12) ? "PM" : "AM"; snprintf(dt, sizeof(dt), "%02d/%02d/%04d %02d:%02d %s", it->mtime.wMonth, it->mtime.wDay, it->mtime.wYear, hour12, it->mtime.wMinute, ampm); }
         char sizebuf[32] = ""; if (!it->is_dir && show_sizes) snprintf(sizebuf, sizeof(sizebuf), "%10llu", it->size);
         snprintf(line, sizeof(line), "%s %s %s", dt, sizebuf, it->name);
@@ -382,11 +382,11 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     BUF_PUT_TEXT(1, mid_y+1, "Main", attr_main_hdr);
     const char *main_items[] = { "Command Prompt", "Editor", "MS-DOS QBasic", "Disk Utilities" };
     int main_count = sizeof(main_items)/sizeof(main_items[0]);
-    for (int i = 0; i < bottom_h && i < main_count; ++i) { WORD attr = (cur_pane == PANE_MAIN && i == main_sel) ? (ATTR_HILITE | ATTR_DEFAULT) : ATTR_DEFAULT; BUF_PUT_TEXT(1, mid_y+2 + i, main_items[i], attr); }
+    for (int i = 0; i < bottom_h && i < main_count; ++i) { WORD attr = (cur_pane == PANE_MAIN && i == main_sel) ? (ATTR_HILITE) : ATTR_DEFAULT; BUF_PUT_TEXT(1, mid_y+2 + i, main_items[i], attr); }
     BUF_PUT_TEXT(mid_x+2, mid_y+1, "Active Task List", attr_tasks_hdr);
     const char *tasks[] = { "Command Prompt" };
     int tcount = 1;
-    for (int i = 0; i < bottom_h && i < tcount; ++i) { WORD attr = (cur_pane == PANE_TASKS && i == task_sel) ? (ATTR_HILITE | ATTR_DEFAULT) : ATTR_DEFAULT; BUF_PUT_TEXT(mid_x+2, mid_y+2 + i, tasks[i], attr); }
+    for (int i = 0; i < bottom_h && i < tcount; ++i) { WORD attr = (cur_pane == PANE_TASKS && i == task_sel) ? (ATTR_HILITE) : ATTR_DEFAULT; BUF_PUT_TEXT(mid_x+2, mid_y+2 + i, tasks[i], attr); }
 
     // status bar
     char status[1024];
