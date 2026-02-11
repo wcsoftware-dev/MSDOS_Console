@@ -465,7 +465,37 @@ int main(void) {
                 else file_idx_local[fcount_local++] = i;
             }
 
-            if (me.dwEventFlags == 0 && (me.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)) {
+            if (me.dwEventFlags & MOUSE_WHEELED) {
+                /* mouse wheel: scroll focused pane */
+                SHORT wheel = (SHORT)HIWORD(me.dwButtonState);
+                int steps = wheel / WHEEL_DELTA; /* positive = up, negative = down */
+                int step_lines = steps * 3; /* 3 lines per wheel step */
+                if (step_lines != 0) {
+                    if (cur_pane == PANE_DIR) {
+                        /* move selection and adjust offset */
+                        dir_sel -= step_lines;
+                        if (dir_sel < 0) dir_sel = 0;
+                        if (dcount_local > 0) {
+                            if (dir_sel >= dcount_local) dir_sel = dcount_local - 1;
+                        }
+                        if (dir_sel < dir_offset) dir_offset = dir_sel;
+                        if (dir_sel >= dir_offset + visible_dirs) dir_offset = dir_sel - visible_dirs + 1;
+                    } else if (cur_pane == PANE_FILES) {
+                        file_sel -= step_lines;
+                        if (file_sel < 0) file_sel = 0;
+                        if (fcount_local > 0) {
+                            if (file_sel >= fcount_local) file_sel = fcount_local - 1;
+                        }
+                        if (file_sel < file_offset) file_offset = file_sel;
+                        if (file_sel >= file_offset + visible_files) file_offset = file_sel - visible_files + 1;
+                    } else if (cur_pane == PANE_MAIN) {
+                        main_sel -= step_lines; if (main_sel < 0) main_sel = 0; if (main_sel > MAX_ITEMS-1) main_sel = MAX_ITEMS-1;
+                    } else if (cur_pane == PANE_TASKS) {
+                        task_sel -= step_lines; if (task_sel < 0) task_sel = 0; if (task_sel > MAX_ITEMS-1) task_sel = MAX_ITEMS-1;
+                    }
+                    draw_ui(cwd, items, count, 0);
+                }
+            } else if (me.dwEventFlags == 0 && (me.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)) {
                 // left click
                 if (my >= dt_y && my < dt_y + visible_dirs && mx < mid_x) {
                     int clicked = dir_offset + (my - dt_y);
