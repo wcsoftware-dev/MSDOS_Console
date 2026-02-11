@@ -203,7 +203,29 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     for (int i = 0; i < bottom_h && i < tcount; ++i) { WORD attr = (cur_pane == PANE_TASKS && i == task_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE; BUF_PUT_TEXT(mid_x+2, mid_y+2 + i, tasks[i], attr); }
 
     // status bar
-    char status[1024]; snprintf(status, sizeof(status), " Enter: open   Backspace: up   Q: quit    Selected: %s ", (count>0?items[sel].name:"") );
+    char status[1024];
+    /* determine selected name according to focused pane */
+    char selected[512] = "";
+    if (cur_pane == PANE_DIR) {
+        if (dcount > 0 && dir_sel >= 0 && dir_sel < dcount) {
+            int sel_idx = dir_idx[dir_sel];
+            strncpy_s(selected, sizeof(selected), items[sel_idx].name, _TRUNCATE);
+        }
+    } else if (cur_pane == PANE_FILES) {
+        if (fcount > 0 && file_sel >= 0 && file_sel < fcount) {
+            int sel_idx = file_idx[file_sel];
+            strncpy_s(selected, sizeof(selected), items[sel_idx].name, _TRUNCATE);
+        }
+    } else if (cur_pane == PANE_MAIN) {
+        const char *main_items[] = { "Command Prompt", "Editor", "MS-DOS QBasic", "Disk Utilities" };
+        int main_count = sizeof(main_items)/sizeof(main_items[0]);
+        if (main_sel >= 0 && main_sel < main_count) strncpy_s(selected, sizeof(selected), main_items[main_sel], _TRUNCATE);
+    } else if (cur_pane == PANE_TASKS) {
+        const char *tasks[] = { "Command Prompt" };
+        int tcount = 1;
+        if (task_sel >= 0 && task_sel < tcount) strncpy_s(selected, sizeof(selected), tasks[task_sel], _TRUNCATE);
+    }
+    snprintf(status, sizeof(status), " Enter: open   Backspace: up   PgUp/PgDn: page   Home/End: top/bottom   Q: quit    Selected: %s ", (selected[0]?selected:"") );
     int status_y = h - 1; for (int x = 0; x < w; ++x) { int idx = status_y * w + x; buf[idx].Char.AsciiChar = ' '; buf[idx].Attributes = ATTR_STATUS; }
     BUF_PUT_TEXT(0, status_y, status, ATTR_STATUS);
 
@@ -278,6 +300,36 @@ int main(void) {
                     if (file_sel >= file_offset + visible_lines) file_offset = file_sel - visible_lines + 1;
                 } else if (cur_pane == PANE_MAIN) { if (main_sel < MAX_ITEMS-1) main_sel++; }
                 else if (cur_pane == PANE_TASKS) { if (task_sel < MAX_ITEMS-1) task_sel++; }
+            } else if (ch2 == 73) { // PageUp
+                if (visible_lines <= 0) continue;
+                if (cur_pane == PANE_DIR) {
+                    dir_sel -= visible_lines; if (dir_sel < 0) dir_sel = 0;
+                    if (dir_sel < dir_offset) dir_offset = dir_sel;
+                } else if (cur_pane == PANE_FILES) {
+                    file_sel -= visible_lines; if (file_sel < 0) file_sel = 0;
+                    if (file_sel < file_offset) file_offset = file_sel;
+                } else if (cur_pane == PANE_MAIN) { main_sel = 0; }
+                else if (cur_pane == PANE_TASKS) { task_sel = 0; }
+            } else if (ch2 == 81) { // PageDown
+                if (visible_lines <= 0) continue;
+                if (cur_pane == PANE_DIR) {
+                    if (dir_sel + visible_lines < dcount) dir_sel += visible_lines; else dir_sel = dcount - 1;
+                    if (dir_sel >= dir_offset + visible_lines) dir_offset = dir_sel - visible_lines + 1;
+                } else if (cur_pane == PANE_FILES) {
+                    if (file_sel + visible_lines < fcount) file_sel += visible_lines; else file_sel = fcount - 1;
+                    if (file_sel >= file_offset + visible_lines) file_offset = file_sel - visible_lines + 1;
+                } else if (cur_pane == PANE_MAIN) { main_sel = main_sel + visible_lines; }
+                else if (cur_pane == PANE_TASKS) { task_sel = task_sel + visible_lines; }
+            } else if (ch2 == 71) { // Home
+                if (cur_pane == PANE_DIR) { dir_sel = 0; dir_offset = 0; }
+                else if (cur_pane == PANE_FILES) { file_sel = 0; file_offset = 0; }
+                else if (cur_pane == PANE_MAIN) { main_sel = 0; }
+                else if (cur_pane == PANE_TASKS) { task_sel = 0; }
+            } else if (ch2 == 79) { // End
+                if (cur_pane == PANE_DIR) { dir_sel = (dcount>0)?(dcount-1):0; dir_offset = (dcount>visible_lines)?(dcount-visible_lines):0; }
+                else if (cur_pane == PANE_FILES) { file_sel = (fcount>0)?(fcount-1):0; file_offset = (fcount>visible_lines)?(fcount-visible_lines):0; }
+                else if (cur_pane == PANE_MAIN) { main_sel = /* last */ 3; }
+                else if (cur_pane == PANE_TASKS) { task_sel = /* last */ 0; }
             }
         } else {
             if (ch == 9) { // Tab - switch pane (Shift+Tab to go backward)
