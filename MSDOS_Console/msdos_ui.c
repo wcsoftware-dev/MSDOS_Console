@@ -18,6 +18,8 @@ typedef struct {
 } FileItem;
 
 static HANDLE hConsole;
+static HANDLE hInput;
+static DWORD prevInputMode;
 
 // Pane focus and selections
 typedef enum { PANE_DIR = 0, PANE_FILES = 1, PANE_MAIN = 2, PANE_TASKS = 3 } Pane;
@@ -243,6 +245,19 @@ int main(void) {
     hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     if (hConsole == INVALID_HANDLE_VALUE) return 1;
 
+    hInput = GetStdHandle(STD_INPUT_HANDLE);
+    if (hInput == INVALID_HANDLE_VALUE) return 1;
+
+    /* enable mouse input and disable quick edit so we receive mouse events */
+    DWORD mode = 0;
+    if (GetConsoleMode(hInput, &mode)) {
+        prevInputMode = mode;
+        DWORD newMode = mode;
+        newMode &= ~ENABLE_QUICK_EDIT_MODE; /* disable quick edit */
+        newMode |= ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS;
+        SetConsoleMode(hInput, newMode);
+    }
+
     // Ensure console cursor invisible
     CONSOLE_CURSOR_INFO ci;
     GetConsoleCursorInfo(hConsole, &ci);
@@ -264,10 +279,17 @@ int main(void) {
 
     int running = 1;
     while (running) {
-        int ch = _getch();
-        if (ch == 0 || ch == 0xE0) {
-            int ch2 = _getch();
-            /* compute visible rows for top panes */
+        INPUT_RECORD ir;
+        DWORD read = 0;
+        if (!ReadConsoleInput(hInput, &ir, 1, &read)) break;
+
+        if (ir.EventType == KEY_EVENT) {
+            KEY_EVENT_RECORD kev = ir.Event.KeyEvent;
+            if (!kev.bKeyDown) continue; /* only handle key down */
+            WORD vk = kev.wVirtualKeyCode;
+            CHAR ch = kev.uChar.AsciiChar;
+
+            /* compute visible rows for panes and counts */
             COORD size = get_console_size();
             int w = size.X, h = size.Y;
             int content_top = 3;
@@ -275,23 +297,19 @@ int main(void) {
             int content_h = content_bottom - content_top + 1;
             int top_h = content_h / 2;
             int visible_lines = top_h - 1; if (visible_lines < 0) visible_lines = 0;
-
-            /* count dirs/files */
             int dcount = 0, fcount = 0;
             for (int i = 0; i < count; ++i) { if (items[i].is_dir) dcount++; else fcount++; }
 
-            if (ch2 == 72) { // up
+            if (vk == VK_UP) {
                 if (cur_pane == PANE_DIR) {
                     if (dir_sel > 0) dir_sel--;
                     if (dir_sel < dir_offset) dir_offset = dir_sel;
-                    if (dir_sel < 0) dir_sel = 0;
                 } else if (cur_pane == PANE_FILES) {
                     if (file_sel > 0) file_sel--;
                     if (file_sel < file_offset) file_offset = file_sel;
-                    if (file_sel < 0) file_sel = 0;
                 } else if (cur_pane == PANE_MAIN) { if (main_sel > 0) main_sel--; }
                 else if (cur_pane == PANE_TASKS) { if (task_sel > 0) task_sel--; }
-            } else if (ch2 == 80) { // down
+            } else if (vk == VK_DOWN) {
                 if (cur_pane == PANE_DIR) {
                     if (dir_sel < dcount - 1) dir_sel++;
                     if (dir_sel >= dir_offset + visible_lines) dir_offset = dir_sel - visible_lines + 1;
@@ -300,9 +318,9 @@ int main(void) {
                     if (file_sel >= file_offset + visible_lines) file_offset = file_sel - visible_lines + 1;
                 } else if (cur_pane == PANE_MAIN) { if (main_sel < MAX_ITEMS-1) main_sel++; }
                 else if (cur_pane == PANE_TASKS) { if (task_sel < MAX_ITEMS-1) task_sel++; }
-            } else if (ch2 == 73) { // PageUp
-                if (visible_lines <= 0) continue;
-                if (cur_pane == PANE_DIR) {
+            } else if (vk == VK_PRIOR) { // PageUp
+                if (visible_lines <= 0) { }
+                else if (cur_pane == PANE_DIR) {
                     dir_sel -= visible_lines; if (dir_sel < 0) dir_sel = 0;
                     if (dir_sel < dir_offset) dir_offset = dir_sel;
                 } else if (cur_pane == PANE_FILES) {
@@ -310,9 +328,9 @@ int main(void) {
                     if (file_sel < file_offset) file_offset = file_sel;
                 } else if (cur_pane == PANE_MAIN) { main_sel = 0; }
                 else if (cur_pane == PANE_TASKS) { task_sel = 0; }
-            } else if (ch2 == 81) { // PageDown
-                if (visible_lines <= 0) continue;
-                if (cur_pane == PANE_DIR) {
+            } else if (vk == VK_NEXT) { // PageDown
+                if (visible_lines <= 0) { }
+                else if (cur_pane == PANE_DIR) {
                     if (dir_sel + visible_lines < dcount) dir_sel += visible_lines; else dir_sel = dcount - 1;
                     if (dir_sel >= dir_offset + visible_lines) dir_offset = dir_sel - visible_lines + 1;
                 } else if (cur_pane == PANE_FILES) {
@@ -320,64 +338,96 @@ int main(void) {
                     if (file_sel >= file_offset + visible_lines) file_offset = file_sel - visible_lines + 1;
                 } else if (cur_pane == PANE_MAIN) { main_sel = main_sel + visible_lines; }
                 else if (cur_pane == PANE_TASKS) { task_sel = task_sel + visible_lines; }
-            } else if (ch2 == 71) { // Home
+            } else if (vk == VK_HOME) {
                 if (cur_pane == PANE_DIR) { dir_sel = 0; dir_offset = 0; }
                 else if (cur_pane == PANE_FILES) { file_sel = 0; file_offset = 0; }
                 else if (cur_pane == PANE_MAIN) { main_sel = 0; }
                 else if (cur_pane == PANE_TASKS) { task_sel = 0; }
-            } else if (ch2 == 79) { // End
+            } else if (vk == VK_END) {
                 if (cur_pane == PANE_DIR) { dir_sel = (dcount>0)?(dcount-1):0; dir_offset = (dcount>visible_lines)?(dcount-visible_lines):0; }
                 else if (cur_pane == PANE_FILES) { file_sel = (fcount>0)?(fcount-1):0; file_offset = (fcount>visible_lines)?(fcount-visible_lines):0; }
-                else if (cur_pane == PANE_MAIN) { main_sel = /* last */ 3; }
-                else if (cur_pane == PANE_TASKS) { task_sel = /* last */ 0; }
-            }
-        } else {
-            if (ch == 9) { // Tab - switch pane (Shift+Tab to go backward)
+                else if (cur_pane == PANE_MAIN) { main_sel = 3; }
+                else if (cur_pane == PANE_TASKS) { task_sel = 0; }
+            } else if (vk == VK_TAB) {
                 SHORT shiftState = GetAsyncKeyState(VK_SHIFT);
-                if (shiftState & 0x8000) {
-                    // Shift is down: move focus backward
-                    cur_pane = (Pane)((cur_pane + 4 - 1) % 4);
-                } else {
-                    // Normal Tab: move focus forward
-                    cur_pane = (Pane)((cur_pane + 1) % 4);
-                }
-            } else if (ch == 13) { // Enter
-                // If directory pane focused, change directory to selected dir
+                if (shiftState & 0x8000) cur_pane = (Pane)((cur_pane + 4 - 1) % 4);
+                else cur_pane = (Pane)((cur_pane + 1) % 4);
+            } else if (vk == VK_RETURN) {
+                // Enter handling
                 if (cur_pane == PANE_DIR) {
-                    // build dirs list to map dir_sel to items
-                    int dcount = 0;
-                    int dir_idx[MAX_ITEMS];
-                    for (int i = 0; i < count; ++i) if (items[i].is_dir) dir_idx[dcount++] = i;
-                    if (dcount > 0 && dir_sel < dcount) {
-                        const char *dname = items[dir_idx[dir_sel]].name;
+                    int dcount2 = 0; int dir_idx2[MAX_ITEMS];
+                    for (int i = 0; i < count; ++i) if (items[i].is_dir) dir_idx2[dcount2++] = i;
+                    if (dcount2 > 0 && dir_sel < dcount2) {
+                        const char *dname = items[dir_idx2[dir_sel]].name;
                         if (strcmp(dname, "..") == 0) SetCurrentDirectoryA("..");
-                        else {
-                            char newpath[MAX_PATH];
-                            snprintf(newpath, sizeof(newpath), "%s\\%s", cwd, dname);
-                            SetCurrentDirectoryA(newpath);
-                        }
+                        else { char newpath[MAX_PATH]; snprintf(newpath, sizeof(newpath), "%s\\%s", cwd, dname); SetCurrentDirectoryA(newpath); }
                         GetCurrentDirectoryA(MAX_PATH, cwd);
                         load_directory(cwd, items, &count);
-                        dir_sel = 0; file_sel = 0;
+                        dir_sel = 0; file_sel = 0; dir_offset = 0; file_offset = 0;
                     }
-                } else if (cur_pane == PANE_FILES) {
-                    // (placeholder) open file: do nothing for now
                 }
-            } else if (ch == 8) { // Backspace
-                SetCurrentDirectoryA("..");
-                GetCurrentDirectoryA(MAX_PATH, cwd);
-                load_directory(cwd, items, &count);
-                dir_sel = 0; file_sel = 0;
             } else if (ch == 'q' || ch == 'Q') {
                 running = 0;
+            } else if (vk == VK_BACK) {
+                SetCurrentDirectoryA(".."); GetCurrentDirectoryA(MAX_PATH, cwd); load_directory(cwd, items, &count); dir_sel = 0; file_sel = 0; dir_offset = 0; file_offset = 0;
             }
+            draw_ui(cwd, items, count, 0);
+        } else if (ir.EventType == MOUSE_EVENT) {
+            MOUSE_EVENT_RECORD me = ir.Event.MouseEvent;
+            int mx = me.dwMousePosition.X;
+            int my = me.dwMousePosition.Y;
+            // recompute layout
+            COORD size = get_console_size(); int w = size.X, h = size.Y;
+            int content_top = 3; int content_bottom = h - 2; int content_h = content_bottom - content_top + 1;
+            int left_w = w / 3; int mid_x = left_w; int top_h = content_h / 2;
+            int dt_y = content_top + 1; int fl_y = content_top + 1;
+            int visible_dirs = (content_top + top_h - 1) - dt_y + 1; if (visible_dirs < 0) visible_dirs = 0;
+            int visible_files = (content_top + top_h - 1) - fl_y + 1; if (visible_files < 0) visible_files = 0;
+
+            // build dir/file index maps
+            int dir_idx_local[MAX_ITEMS]; int file_idx_local[MAX_ITEMS]; int dcount_local = 0, fcount_local = 0;
+            for (int i = 0; i < count; ++i) {
+                if (items[i].is_dir) dir_idx_local[dcount_local++] = i;
+                else file_idx_local[fcount_local++] = i;
+            }
+
+            if (me.dwEventFlags == 0 && (me.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)) {
+                // left click
+                if (my >= dt_y && my < dt_y + visible_dirs && mx < mid_x) {
+                    int clicked = dir_offset + (my - dt_y);
+                    if (clicked >= 0 && clicked < dcount_local) dir_sel = clicked;
+                } else if (my >= fl_y && my < fl_y + visible_files && mx >= mid_x+2) {
+                    int clicked = file_offset + (my - fl_y);
+                    if (clicked >= 0 && clicked < fcount_local) file_sel = clicked;
+                }
+                draw_ui(cwd, items, count, 0);
+            } else if ((me.dwEventFlags & DOUBLE_CLICK) && (me.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)) {
+                // double click -> open if dir
+                if (my >= dt_y && my < dt_y + visible_dirs && mx < mid_x) {
+                    int clicked = dir_offset + (my - dt_y);
+                    if (clicked >= 0 && clicked < dcount_local) {
+                        int sel_idx = dir_idx_local[clicked];
+                        const char *dname = items[sel_idx].name;
+                        if (strcmp(dname, "..") == 0) SetCurrentDirectoryA("..");
+                        else { char newpath[MAX_PATH]; snprintf(newpath, sizeof(newpath), "%s\\%s", cwd, dname); SetCurrentDirectoryA(newpath); }
+                        GetCurrentDirectoryA(MAX_PATH, cwd);
+                        load_directory(cwd, items, &count);
+                        dir_sel = 0; file_sel = 0; dir_offset = 0; file_offset = 0;
+                    }
+                }
+                draw_ui(cwd, items, count, 0);
+            }
+        } else if (ir.EventType == WINDOW_BUFFER_SIZE_EVENT) {
+            // window resized - redraw
+            draw_ui(cwd, items, count, 0);
         }
-        draw_ui(cwd, items, count, 0);
     }
 
     // Restore cursor before exit
     ci.bVisible = TRUE;
     SetConsoleCursorInfo(hConsole, &ci);
+    // restore input mode
+    if (hInput != INVALID_HANDLE_VALUE) SetConsoleMode(hInput, prevInputMode);
     // Reset attributes
     SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
     return 0;
