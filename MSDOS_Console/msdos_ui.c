@@ -283,8 +283,8 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
         for (int mi = 0; mi < mcount; ++mi) { int l = (int)strlen(mitems[mi]); if (l > mw) mw = l; }
         int left = mx - 1;
         int right = mx + mw + 2;
-        int top = 1;
-        int bottom = 2 + mcount;
+        int top = 2; /* draw menu one line below the menu bar */
+        int bottom = top + mcount + 1;
         WORD menuBg = (WORD)(BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE); /* grey/white background */
         /* draw border with same grey background so it blends */
         WORD borderAttr = menuBg;
@@ -307,7 +307,7 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
         for (int y = top + 1; y < bottom; ++y) { BUF_PUT_TEXT(left, y, "|", borderAttr); BUF_PUT_TEXT(right, y, "|", borderAttr); }
         /* draw items */
         for (int mi = 0; mi < mcount; ++mi) {
-            int y = 2 + mi;
+            int y = top + 1 + mi;
             WORD a = (mi == menu_sel) ? ATTR_HILITE : menuBg;
             char txt[128]; snprintf(txt, sizeof(txt), " %s", mitems[mi]);
             /* pad to width */
@@ -622,8 +622,9 @@ int main(void) {
                     const char **mitems = (menu_id == 0) ? file_menu_items : options_menu_items;
                     int mcount = (menu_id == 0) ? file_menu_count : options_menu_count;
                     int mw = 0; for (int mi = 0; mi < mcount; ++mi) { int l = (int)strlen(mitems[mi]); if (l > mw) mw = l; }
-                    if (my >= 2 && my < 2 + mcount && mx >= mxbase && mx < mxbase + mw + 2) {
-                        int clicked = my - 2;
+                    int menu_top = 2; /* must match draw position */
+                    if (my >= menu_top + 1 && my < menu_top + 1 + mcount && mx >= mxbase && mx < mxbase + mw + 2) {
+                        int clicked = my - (menu_top + 1);
                         menu_sel = clicked;
                         // perform action
                         if (menu_id == 0) {
