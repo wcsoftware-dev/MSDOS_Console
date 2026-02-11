@@ -86,6 +86,17 @@ static int main_sel = 0;
 static int task_sel = 0;
 static int dir_offset = 0;
 static int file_offset = 0;
+static int menu_active = 0; /* 0 = none, 1 = active */
+static int menu_id = 0; /* 0=file,1=options */
+static int menu_sel = 0;
+static int show_sizes = 1;
+static char status_msg[256] = "";
+
+/* Menu definitions */
+static const char *file_menu_items[] = { "Refresh", "Exit" };
+static const int file_menu_count = 2;
+static const char *options_menu_items[] = { "Show Sizes", "About" };
+static const int options_menu_count = 2;
 
 // Console color helpers
 enum {
@@ -207,6 +218,12 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     WORD attr_main_hdr = (cur_pane == PANE_MAIN) ? ATTR_YELLOW_ON_BLUE : ATTR_WHITE_ON_BLUE;
     WORD attr_tasks_hdr = (cur_pane == PANE_TASKS) ? ATTR_YELLOW_ON_BLUE : ATTR_WHITE_ON_BLUE;
 
+    // Menu positions
+    int menu_file_x = 1;
+    int menu_options_x = 7; /* matches spacing in menu bar string */
+
+    /* menu is drawn after the main content so it appears above panes */
+
     // dividers
     for (int y = content_top; y <= content_bottom; ++y) BUF_PUT_TEXT(mid_x, y, "|", ATTR_WHITE_ON_BLUE);
     for (int x = 0; x < w; ++x) BUF_PUT_TEXT(x, mid_y, "-", ATTR_WHITE_ON_BLUE);
@@ -245,7 +262,8 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     for (int i = 0; i < visible_files && (i + file_offset) < fcount; ++i) {
         int idx = file_idx[i + file_offset]; FileItem *it = &items[idx]; WORD attr = (cur_pane == PANE_FILES && (i + file_offset) == file_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
         char line[1024]; char dt[64] = ""; if (it->mtime.wYear != 0) { int hour = it->mtime.wHour; int hour12 = hour % 12; if (hour12 == 0) hour12 = 12; const char *ampm = (hour >= 12) ? "PM" : "AM"; snprintf(dt, sizeof(dt), "%02d/%02d/%04d %02d:%02d %s", it->mtime.wMonth, it->mtime.wDay, it->mtime.wYear, hour12, it->mtime.wMinute, ampm); }
-        char sizebuf[32] = ""; if (!it->is_dir) snprintf(sizebuf, sizeof(sizebuf), "%10llu", it->size); snprintf(line, sizeof(line), "%s %s %s", dt, sizebuf, it->name);
+        char sizebuf[32] = ""; if (!it->is_dir && show_sizes) snprintf(sizebuf, sizeof(sizebuf), "%10llu", it->size);
+        snprintf(line, sizeof(line), "%s %s %s", dt, sizebuf, it->name);
         int available = w - (mid_x + 3); if ((int)strlen(line) > available) line[available] = '\0'; BUF_PUT_TEXT(mid_x+2, fl_y + i, line, attr);
     }
 
@@ -254,6 +272,51 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
         int col = w - 1; for (int y = fl_y; y < fl_y + visible_files; ++y) BUF_PUT_TEXT(col, y, "|", ATTR_SCROLL);
         int thumb_pos = fl_y; if (fcount > 1) thumb_pos = fl_y + (file_offset * (visible_files - 1)) / (fcount - 1);
         if (thumb_pos < fl_y) thumb_pos = fl_y; if (thumb_pos > fl_y + visible_files - 1) thumb_pos = fl_y + visible_files - 1; BUF_PUT_TEXT(col, thumb_pos, "O", ATTR_HILITE);
+    }
+
+    // If menu active, draw it last so it overlays panes
+    if (menu_active) {
+        int mx = (menu_id == 0) ? menu_file_x : menu_options_x;
+        const char **mitems = (menu_id == 0) ? file_menu_items : options_menu_items;
+        int mcount = (menu_id == 0) ? file_menu_count : options_menu_count;
+        int mw = 0;
+        for (int mi = 0; mi < mcount; ++mi) { int l = (int)strlen(mitems[mi]); if (l > mw) mw = l; }
+        int left = mx - 1;
+        int right = mx + mw + 2;
+        int top = 1;
+        int bottom = 2 + mcount;
+        WORD menuBg = (WORD)(BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE); /* grey/white background */
+        /* draw border with same grey background so it blends */
+        WORD borderAttr = menuBg;
+        WORD itemAttr = menuBg;
+        /* fill interior */
+        for (int y = top + 1; y < bottom; ++y) {
+            for (int x = left + 1; x < right; ++x) {
+                int idx = y * w + x;
+                buf[idx].Char.AsciiChar = ' ';
+                buf[idx].Attributes = menuBg;
+            }
+        }
+        /* draw border */
+        BUF_PUT_TEXT(left, top, "+", borderAttr);
+        BUF_PUT_TEXT(right, top, "+", borderAttr);
+        BUF_PUT_TEXT(left, bottom, "+", borderAttr);
+        BUF_PUT_TEXT(right, bottom, "+", borderAttr);
+        for (int x = left + 1; x < right; ++x) BUF_PUT_TEXT(x, top, "-", borderAttr);
+        for (int x = left + 1; x < right; ++x) BUF_PUT_TEXT(x, bottom, "-", borderAttr);
+        for (int y = top + 1; y < bottom; ++y) { BUF_PUT_TEXT(left, y, "|", borderAttr); BUF_PUT_TEXT(right, y, "|", borderAttr); }
+        /* draw items */
+        for (int mi = 0; mi < mcount; ++mi) {
+            int y = 2 + mi;
+            WORD a = (mi == menu_sel) ? ATTR_HILITE : menuBg;
+            char txt[128]; snprintf(txt, sizeof(txt), " %s", mitems[mi]);
+            /* pad to width */
+            char padded[128]; strncpy_s(padded, sizeof(padded), txt, _TRUNCATE);
+            int l = (int)strlen(padded);
+            for (int p = l; p < mw+1; ++p) padded[p] = ' ';
+            padded[mw+1] = '\0';
+            BUF_PUT_TEXT(mx, y, padded, a);
+        }
     }
 
     // bottom panes
@@ -357,6 +420,43 @@ int main(void) {
             WORD vk = kev.wVirtualKeyCode;
             CHAR ch = kev.uChar.AsciiChar;
 
+            /* handle menu navigation if active */
+            if (menu_active) {
+                if (vk == VK_LEFT || vk == 'f' || vk == 'F') {
+                    menu_id = 0; menu_sel = 0;
+                } else if (vk == VK_RIGHT || vk == 'o' || vk == 'O') {
+                    menu_id = 1; menu_sel = 0;
+                } else if (vk == VK_UP) {
+                    if (menu_sel > 0) menu_sel--;
+                } else if (vk == VK_DOWN) {
+                    if (menu_id == 0 && menu_sel < file_menu_count-1) menu_sel++;
+                    if (menu_id == 1 && menu_sel < options_menu_count-1) menu_sel++;
+                } else if (vk == VK_RETURN) {
+                    // perform menu action
+                    if (menu_id == 0) {
+                        if (menu_sel == 0) {
+                            // Refresh
+                            load_directory(cwd, items, &count);
+                            int dcount_new = 0, fcount_new = 0; for (int i = 0; i < count; ++i) if (items[i].is_dir) dcount_new++; else fcount_new++;
+                            restore_selection_for_path(cwd, dcount_new, fcount_new);
+                        } else if (menu_sel == 1) {
+                            running = 0;
+                        }
+                    } else if (menu_id == 1) {
+                        if (menu_sel == 0) {
+                            show_sizes = !show_sizes;
+                        } else if (menu_sel == 1) {
+                            snprintf(status_msg, sizeof(status_msg), "MS-DOS Shell - Demo\n");
+                        }
+                    }
+                    menu_active = 0;
+                } else if (vk == VK_ESCAPE) {
+                    menu_active = 0;
+                }
+                draw_ui(cwd, items, count, 0);
+                continue;
+            }
+
             /* compute visible rows for panes and counts */
             COORD size = get_console_size();
             int w = size.X, h = size.Y;
@@ -420,6 +520,12 @@ int main(void) {
                 SHORT shiftState = GetAsyncKeyState(VK_SHIFT);
                 if (shiftState & 0x8000) cur_pane = (Pane)((cur_pane + 4 - 1) % 4);
                 else cur_pane = (Pane)((cur_pane + 1) % 4);
+            } else if ((kev.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) && (vk == 'F' || vk == 'f')) {
+                // Alt+F -> open File menu (classic)
+                menu_active = 1; menu_id = 0; menu_sel = 0; draw_ui(cwd, items, count, 0);
+            } else if ((kev.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) && (vk == 'O' || vk == 'o')) {
+                // Alt+O -> open Options menu (classic)
+                menu_active = 1; menu_id = 1; menu_sel = 0; draw_ui(cwd, items, count, 0);
             } else if (vk == VK_RETURN) {
                 // Enter handling
                 if (cur_pane == PANE_DIR) {
@@ -496,6 +602,52 @@ int main(void) {
                     draw_ui(cwd, items, count, 0);
                 }
             } else if (me.dwEventFlags == 0 && (me.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)) {
+                // handle menu bar / dropdown clicks first
+                int menu_file_x = 1;
+                int menu_options_x = 7;
+                if (my == 1) {
+                    // click on menu bar
+                    if (mx >= menu_file_x && mx < menu_file_x + 4) {
+                        menu_active = 1; menu_id = 0; menu_sel = 0; draw_ui(cwd, items, count, 0); continue;
+                    } else if (mx >= menu_options_x && mx < menu_options_x + 7) {
+                        menu_active = 1; menu_id = 1; menu_sel = 0; draw_ui(cwd, items, count, 0); continue;
+                    } else {
+                        // clicked other menu bar area -> close menu
+                        if (menu_active) { menu_active = 0; draw_ui(cwd, items, count, 0); continue; }
+                    }
+                }
+                if (menu_active) {
+                    // compute dropdown position and width
+                    int mxbase = (menu_id == 0) ? menu_file_x : menu_options_x;
+                    const char **mitems = (menu_id == 0) ? file_menu_items : options_menu_items;
+                    int mcount = (menu_id == 0) ? file_menu_count : options_menu_count;
+                    int mw = 0; for (int mi = 0; mi < mcount; ++mi) { int l = (int)strlen(mitems[mi]); if (l > mw) mw = l; }
+                    if (my >= 2 && my < 2 + mcount && mx >= mxbase && mx < mxbase + mw + 2) {
+                        int clicked = my - 2;
+                        menu_sel = clicked;
+                        // perform action
+                        if (menu_id == 0) {
+                            if (menu_sel == 0) {
+                                // Refresh
+                                load_directory(cwd, items, &count);
+                                int dcount_new = 0, fcount_new = 0; for (int i = 0; i < count; ++i) if (items[i].is_dir) dcount_new++; else fcount_new++;
+                                restore_selection_for_path(cwd, dcount_new, fcount_new);
+                            } else if (menu_sel == 1) {
+                                running = 0;
+                            }
+                        } else {
+                            if (menu_sel == 0) {
+                                show_sizes = !show_sizes;
+                            } else if (menu_sel == 1) {
+                                snprintf(status_msg, sizeof(status_msg), "MS-DOS Shell demo");
+                            }
+                        }
+                        menu_active = 0; draw_ui(cwd, items, count, 0); continue;
+                    } else {
+                        // click outside dropdown closes menu
+                        menu_active = 0; draw_ui(cwd, items, count, 0); continue;
+                    }
+                }
                 // left click
                 if (my >= dt_y && my < dt_y + visible_dirs && mx < mid_x) {
                     int clicked = dir_offset + (my - dt_y);
