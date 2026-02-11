@@ -103,185 +103,118 @@ static void load_directory(const char* path, FileItem* items, int* count) {
 static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     COORD size = get_console_size();
     int w = size.X, h = size.Y;
-    // Clear whole screen
-    for (int y = 0; y < h; ++y) fill_line(y, ATTR_WHITE_ON_BLUE, w);
+    int total = w * h;
+    CHAR_INFO *buf = (CHAR_INFO*)malloc(sizeof(CHAR_INFO) * total);
+    if (!buf) return;
 
-    // Title bar (line 0)
-    char title[256];
-    snprintf(title, sizeof(title), " MS-DOS Shell ");
-    int title_x = (w > (int)strlen(title)) ? (w/2 - (int)strlen(title)/2) : 0;
-    put_text(0, 0, "", ATTR_WHITE_ON_BLUE);
-    put_text(title_x, 0, title, ATTR_WHITE_ON_BLUE);
+    // fill background
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            int idx = y * w + x;
+            buf[idx].Char.AsciiChar = ' ';
+            buf[idx].Attributes = ATTR_WHITE_ON_BLUE;
+        }
+    }
 
-    // Menu bar (line 1)
-    put_text(0, 1, " File  Options  View  Help", ATTR_WHITE_ON_BLUE);
+#define BUF_PUT_TEXT(px,py,txt,attr) do { \
+        const char *_s = (txt); \
+        for (int _i = 0; _i < (int)strlen(_s); ++_i) { \
+            int _x = (px) + _i; int _y = (py); \
+            if (_x < 0 || _x >= w || _y < 0 || _y >= h) continue; \
+            int _idx = _y * w + _x; \
+            buf[_idx].Char.AsciiChar = _s[_i]; \
+            buf[_idx].Attributes = (attr); \
+        } \
+    } while (0)
 
-    // Path bar (line 2)
-    char pathbar[1024];
-    snprintf(pathbar, sizeof(pathbar), " %s", cwd);
-    put_text(0, 2, pathbar, ATTR_WHITE_ON_BLUE);
-
-    // Content area from line 3 to h-2 (reserve last line for status)
     int content_top = 3;
     int content_bottom = h - 2;
     int content_h = content_bottom - content_top + 1;
-
-    // Split vertically: left = 1/3, right = 2/3
     int left_w = w / 3;
     int mid_x = left_w;
-    int right_w = w - left_w - 1;
-
-    // Split horizontally in content: top and bottom panes
     int top_h = content_h / 2;
-    int bottom_h = content_h - top_h - 1; // leave one line for horizontal divider
     int mid_y = content_top + top_h;
+    int bottom_h = content_h - top_h - 1; // lines available for bottom panes
 
-    // Draw vertical divider
-    for (int y = content_top; y <= content_bottom; ++y) {
-        put_text(mid_x, y, "|", ATTR_WHITE_ON_BLUE);
-    }
-    // Draw horizontal divider
-    for (int x = 0; x < w; ++x) put_text(x, mid_y, "-", ATTR_WHITE_ON_BLUE);
+    // title/menu/path
+    char title[256]; snprintf(title, sizeof(title), " MS-DOS Shell ");
+    int title_x = (w > (int)strlen(title)) ? (w/2 - (int)strlen(title)/2) : 0;
+    BUF_PUT_TEXT(title_x, 0, title, ATTR_WHITE_ON_BLUE);
+    BUF_PUT_TEXT(0, 1, " File  Options  View  Help", ATTR_WHITE_ON_BLUE);
+    char pathbar[1024]; snprintf(pathbar, sizeof(pathbar), " %s", cwd); BUF_PUT_TEXT(0, 2, pathbar, ATTR_WHITE_ON_BLUE);
 
-    // Build lists of dirs and files
-    int dir_idx[MAX_ITEMS];
-    int file_idx[MAX_ITEMS];
-    int dcount = 0, fcount = 0;
-    for (int i = 0; i < count; ++i) {
-        if (items[i].is_dir) dir_idx[dcount++] = i;
-        else file_idx[fcount++] = i;
-    }
+    // dividers
+    for (int y = content_top; y <= content_bottom; ++y) BUF_PUT_TEXT(mid_x, y, "|", ATTR_WHITE_ON_BLUE);
+    for (int x = 0; x < w; ++x) BUF_PUT_TEXT(x, mid_y, "-", ATTR_WHITE_ON_BLUE);
 
-    /* Clamp per-pane selections to available counts to avoid overflow */
-    if (dcount == 0) dir_sel = 0;
-    else if (dir_sel >= dcount) dir_sel = dcount - 1;
+    // Build lists
+    int dir_idx[MAX_ITEMS]; int file_idx[MAX_ITEMS]; int dcount = 0, fcount = 0;
+    for (int i = 0; i < count; ++i) { if (items[i].is_dir) dir_idx[dcount++] = i; else file_idx[fcount++] = i; }
 
-    if (fcount == 0) file_sel = 0;
-    else if (file_sel >= fcount) file_sel = fcount - 1;
+    if (dcount == 0) dir_sel = 0; else if (dir_sel >= dcount) dir_sel = dcount - 1;
+    if (fcount == 0) file_sel = 0; else if (file_sel >= fcount) file_sel = fcount - 1;
 
-    const int MAIN_COUNT_CONST = 4; /* Command Prompt, Editor, QBasic, Disk Utilities */
-    const int TASKS_COUNT_CONST = 1; /* Active tasks count */
-    if (main_sel >= MAIN_COUNT_CONST) main_sel = MAIN_COUNT_CONST - 1;
-    if (task_sel >= TASKS_COUNT_CONST) task_sel = TASKS_COUNT_CONST - 1;
+    // directory header and count
+    BUF_PUT_TEXT(1, content_top, "Directory Tree", ATTR_WHITE_ON_BLUE);
+    char cntbuf[32]; int selpos = (dcount>0)?(dir_sel+1):0; snprintf(cntbuf,sizeof(cntbuf),"%d/%d",selpos,dcount);
+    int posx = mid_x - (int)strlen(cntbuf) - 1; if (posx < 0) posx = 0; BUF_PUT_TEXT(posx, content_top, cntbuf, ATTR_WHITE_ON_BLUE);
 
-    // Left-top: Directory Tree (content_top .. mid_y-1, x 0..mid_x-1)
-    put_text(1, content_top, "Directory Tree", ATTR_WHITE_ON_BLUE);
-    // show selection/total for dirs
-    {
-        char cntbuf[32];
-        int selpos = (dcount > 0) ? (dir_sel + 1) : 0;
-        snprintf(cntbuf, sizeof(cntbuf), "%d/%d", selpos, dcount);
-        int posx = mid_x - (int)strlen(cntbuf) - 1;
-        if (posx < 0) posx = 0;
-        put_text(posx, content_top, cntbuf, ATTR_WHITE_ON_BLUE);
-    }
-    int dt_y = content_top + 1;
-    int dt_max = (mid_y - 1) - dt_y + 1;
-    // apply dir_offset for scrolling
-    int visible_dirs = dt_max;
-    if (visible_dirs < 0) visible_dirs = 0;
-    if (dir_offset < 0) dir_offset = 0;
-    if (dir_offset > dcount - visible_dirs) dir_offset = dcount - visible_dirs;
-    if (dir_offset < 0) dir_offset = 0;
+    int dt_y = content_top + 1; int dt_max = (mid_y - 1) - dt_y + 1; int visible_dirs = dt_max; if (visible_dirs < 0) visible_dirs = 0;
+    if (dir_offset < 0) dir_offset = 0; if (dir_offset > dcount - visible_dirs) dir_offset = dcount - visible_dirs; if (dir_offset < 0) dir_offset = 0;
     for (int i = 0; i < visible_dirs && (i + dir_offset) < dcount; ++i) {
-        int idx = dir_idx[i + dir_offset];
-        WORD attr = (cur_pane == PANE_DIR && (i + dir_offset) == dir_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
-        char line[512];
-        snprintf(line, sizeof(line), "  [%c] %s", 'D', items[idx].name);
-        // truncate to left width
-        if ((int)strlen(line) > left_w-2) line[left_w-2] = '\0';
-        put_text(1, dt_y + i, line, attr);
+        int idx = dir_idx[i + dir_offset]; WORD attr = (cur_pane == PANE_DIR && (i + dir_offset) == dir_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        char line[512]; snprintf(line,sizeof(line),"  [%c] %s", 'D', items[idx].name); if ((int)strlen(line) > left_w-2) line[left_w-2] = '\0'; BUF_PUT_TEXT(1, dt_y + i, line, attr);
     }
 
-    // draw left scrollbar indicator
+    // left scrollbar
     if (dcount > visible_dirs && visible_dirs > 0) {
-        int col = mid_x - 1;
-        // draw scrollbar track (use green on blue so track stands out)
-        for (int y = dt_y; y < dt_y + visible_dirs; ++y) put_text(col, y, "|", ATTR_SCROLL);
-        int thumb_pos = dt_y;
-        if (dcount > 1) thumb_pos = dt_y + (dir_offset * (visible_dirs - 1)) / (dcount - 1);
-        if (thumb_pos < dt_y) thumb_pos = dt_y;
-        if (thumb_pos > dt_y + visible_dirs - 1) thumb_pos = dt_y + visible_dirs - 1;
-        put_text(col, thumb_pos, "O", ATTR_HILITE);
+        int col = mid_x - 1; for (int y = dt_y; y < dt_y + visible_dirs; ++y) BUF_PUT_TEXT(col, y, "|", ATTR_SCROLL);
+        int thumb_pos = dt_y; if (dcount > 1) thumb_pos = dt_y + (dir_offset * (visible_dirs - 1)) / (dcount - 1);
+        if (thumb_pos < dt_y) thumb_pos = dt_y; if (thumb_pos > dt_y + visible_dirs - 1) thumb_pos = dt_y + visible_dirs - 1; BUF_PUT_TEXT(col, thumb_pos, "O", ATTR_HILITE);
     }
 
-    // Right-top: File list (content_top .. mid_y-1, x mid_x+1 .. w-1)
-    put_text(mid_x+2, content_top, "Files", ATTR_WHITE_ON_BLUE);
-    // show selection/total for files
-    {
-        char cntbuf[32];
-        int selpos = (fcount > 0) ? (file_sel + 1) : 0;
-        snprintf(cntbuf, sizeof(cntbuf), "%d/%d", selpos, fcount);
-        int posx = w - (int)strlen(cntbuf) - 1;
-        if (posx < mid_x+2) posx = mid_x+2;
-        put_text(posx, content_top, cntbuf, ATTR_WHITE_ON_BLUE);
-    }
-    int fl_y = content_top + 1;
-    int fl_max = (mid_y - 1) - fl_y + 1;
-    int visible_files = fl_max;
-    if (visible_files < 0) visible_files = 0;
-    if (file_offset < 0) file_offset = 0;
-    if (file_offset > fcount - visible_files) file_offset = fcount - visible_files;
-    if (file_offset < 0) file_offset = 0;
+    // files header and list
+    BUF_PUT_TEXT(mid_x+2, content_top, "Files", ATTR_WHITE_ON_BLUE);
+    selpos = (fcount>0)?(file_sel+1):0; snprintf(cntbuf,sizeof(cntbuf),"%d/%d",selpos,fcount); posx = w - (int)strlen(cntbuf) - 1; if (posx < mid_x+2) posx = mid_x+2; BUF_PUT_TEXT(posx, content_top, cntbuf, ATTR_WHITE_ON_BLUE);
+    int fl_y = content_top + 1; int fl_max = (mid_y - 1) - fl_y + 1; int visible_files = fl_max; if (visible_files < 0) visible_files = 0;
+    if (file_offset < 0) file_offset = 0; if (file_offset > fcount - visible_files) file_offset = fcount - visible_files; if (file_offset < 0) file_offset = 0;
     for (int i = 0; i < visible_files && (i + file_offset) < fcount; ++i) {
-        int idx = file_idx[i + file_offset];
-        FileItem *it = &items[idx];
-        WORD attr = (cur_pane == PANE_FILES && i == file_sel - file_offset) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
-        char line[1024];
-        char dt[64] = "";
-        if (it->mtime.wYear != 0) {
-            int hour = it->mtime.wHour;
-            int hour12 = hour % 12; if (hour12 == 0) hour12 = 12;
-            const char *ampm = (hour >= 12) ? "PM" : "AM";
-            snprintf(dt, sizeof(dt), "%02d/%02d/%04d %02d:%02d %s",
-                     it->mtime.wMonth, it->mtime.wDay, it->mtime.wYear,
-                     hour12, it->mtime.wMinute, ampm);
-        }
-        char sizebuf[32] = "";
-        if (!it->is_dir) snprintf(sizebuf, sizeof(sizebuf), "%10llu", it->size);
-        snprintf(line, sizeof(line), "%s %s %s", dt, sizebuf, it->name);
-        // truncate to right width
-        int available = w - (mid_x + 3);
-        if ((int)strlen(line) > available) line[available] = '\0';
-        put_text(mid_x+2, fl_y + i, line, attr);
+        int idx = file_idx[i + file_offset]; FileItem *it = &items[idx]; WORD attr = (cur_pane == PANE_FILES && (i + file_offset) == file_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        char line[1024]; char dt[64] = ""; if (it->mtime.wYear != 0) { int hour = it->mtime.wHour; int hour12 = hour % 12; if (hour12 == 0) hour12 = 12; const char *ampm = (hour >= 12) ? "PM" : "AM"; snprintf(dt, sizeof(dt), "%02d/%02d/%04d %02d:%02d %s", it->mtime.wMonth, it->mtime.wDay, it->mtime.wYear, hour12, it->mtime.wMinute, ampm); }
+        char sizebuf[32] = ""; if (!it->is_dir) snprintf(sizebuf, sizeof(sizebuf), "%10llu", it->size); snprintf(line, sizeof(line), "%s %s %s", dt, sizebuf, it->name);
+        int available = w - (mid_x + 3); if ((int)strlen(line) > available) line[available] = '\0'; BUF_PUT_TEXT(mid_x+2, fl_y + i, line, attr);
     }
 
-    // draw right scrollbar indicator
+    // right scrollbar
     if (fcount > visible_files && visible_files > 0) {
-        int col = w - 1;
-        for (int y = fl_y; y < fl_y + visible_files; ++y) put_text(col, y, "|", ATTR_SCROLL);
-        int thumb_pos = fl_y;
-        if (fcount > 1) thumb_pos = fl_y + (file_offset * (visible_files - 1)) / (fcount - 1);
-        if (thumb_pos < fl_y) thumb_pos = fl_y;
-        if (thumb_pos > fl_y + visible_files - 1) thumb_pos = fl_y + visible_files - 1;
-        put_text(col, thumb_pos, "O", ATTR_HILITE);
+        int col = w - 1; for (int y = fl_y; y < fl_y + visible_files; ++y) BUF_PUT_TEXT(col, y, "|", ATTR_SCROLL);
+        int thumb_pos = fl_y; if (fcount > 1) thumb_pos = fl_y + (file_offset * (visible_files - 1)) / (fcount - 1);
+        if (thumb_pos < fl_y) thumb_pos = fl_y; if (thumb_pos > fl_y + visible_files - 1) thumb_pos = fl_y + visible_files - 1; BUF_PUT_TEXT(col, thumb_pos, "O", ATTR_HILITE);
     }
 
-    // Bottom-left: Main (content mid_y+1 .. content_bottom)
-    put_text(1, mid_y+1, "Main", ATTR_WHITE_ON_BLUE);
+    // bottom panes
+    BUF_PUT_TEXT(1, mid_y+1, "Main", ATTR_WHITE_ON_BLUE);
     const char *main_items[] = { "Command Prompt", "Editor", "MS-DOS QBasic", "Disk Utilities" };
     int main_count = sizeof(main_items)/sizeof(main_items[0]);
-    for (int i = 0; i < bottom_h && i < main_count; ++i) {
-        WORD attr = (cur_pane == PANE_MAIN && i == main_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
-        put_text(1, mid_y+2 + i, main_items[i], attr);
-    }
-
-    // Bottom-right: Active Task List
-    put_text(mid_x+2, mid_y+1, "Active Task List", ATTR_WHITE_ON_BLUE);
+    for (int i = 0; i < bottom_h && i < main_count; ++i) { WORD attr = (cur_pane == PANE_MAIN && i == main_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE; BUF_PUT_TEXT(1, mid_y+2 + i, main_items[i], attr); }
+    BUF_PUT_TEXT(mid_x+2, mid_y+1, "Active Task List", ATTR_WHITE_ON_BLUE);
     const char *tasks[] = { "Command Prompt" };
     int tcount = 1;
-    for (int i = 0; i < bottom_h && i < tcount; ++i) {
-        WORD attr = (cur_pane == PANE_TASKS && i == task_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
-        put_text(mid_x+2, mid_y+2 + i, tasks[i], attr);
-    }
+    for (int i = 0; i < bottom_h && i < tcount; ++i) { WORD attr = (cur_pane == PANE_TASKS && i == task_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE; BUF_PUT_TEXT(mid_x+2, mid_y+2 + i, tasks[i], attr); }
 
-    // Status bar at bottom
-    char status[1024];
-    snprintf(status, sizeof(status), " Enter: open   Backspace: up   Q: quit    Selected: %s ", (count>0?items[sel].name:""));
-    int status_y = h - 1;
-    // Fill then print status text
-    fill_line(status_y, ATTR_STATUS, w);
-    put_text(0, status_y, status, ATTR_STATUS);
+    // status bar
+    char status[1024]; snprintf(status, sizeof(status), " Enter: open   Backspace: up   Q: quit    Selected: %s ", (count>0?items[sel].name:"") );
+    int status_y = h - 1; for (int x = 0; x < w; ++x) { int idx = status_y * w + x; buf[idx].Char.AsciiChar = ' '; buf[idx].Attributes = ATTR_STATUS; }
+    BUF_PUT_TEXT(0, status_y, status, ATTR_STATUS);
+
+    // write buffer to console
+    COORD bufSize = { (SHORT)w, (SHORT)h };
+    COORD bufCoord = { 0, 0 };
+    SMALL_RECT writeRect = { 0, 0, (SHORT)(w - 1), (SHORT)(h - 1) };
+    WriteConsoleOutputA(hConsole, buf, bufSize, bufCoord, &writeRect);
+
+    free(buf);
+    (void)sel; /* avoid unused param warning */
 }
 
 int main(void) {
