@@ -186,12 +186,13 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     CHAR_INFO *buf = (CHAR_INFO*)malloc(sizeof(CHAR_INFO) * total);
     if (!buf) return;
 
-    // fill background: remove solid pane background so underlying console background shows
+    // fill background: use black background for panes and default text color
+    WORD blackBg = (WORD)(BACKGROUND_RED*0 | BACKGROUND_GREEN*0 | BACKGROUND_BLUE*0); /* 0 -> no background bits set -> treated as black */
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             int idx = y * w + x;
             buf[idx].Char.AsciiChar = ' ';
-            buf[idx].Attributes = ATTR_DEFAULT; /* no background color */
+            buf[idx].Attributes = ATTR_DEFAULT; /* foreground default */
         }
     }
 
@@ -218,21 +219,31 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     // title/menu/path
     char title[256]; snprintf(title, sizeof(title), " MS-DOS Shell ");
     int title_x = (w > (int)strlen(title)) ? (w/2 - (int)strlen(title)/2) : 0;
+    /* fill entire title bar row with blue background and write white-on-blue title */
+    for (int x = 0; x < w; ++x) {
+        int idx = 0 * w + x;
+        buf[idx].Char.AsciiChar = ' ';
+        buf[idx].Attributes = ATTR_WHITE_ON_BLUE;
+    }
     BUF_PUT_TEXT(title_x, 0, title, ATTR_WHITE_ON_BLUE);
     // menu/file bar (use grey background to match menu dropdown)
     WORD menuBg = (WORD)(BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE);
-    /* black text on grey background */
+    /* black text on grey background for the menu bar, path uses default background/text */
     WORD menuTextAttr = (WORD)(menuBg);
-    // fill the two bar lines with the grey background first
-    for (int x = 0; x < w; ++x) { int idx1 = 1 * w + x; buf[idx1].Char.AsciiChar = ' '; buf[idx1].Attributes = menuBg; int idx2 = 2 * w + x; buf[idx2].Char.AsciiChar = ' '; buf[idx2].Attributes = menuBg; }
+    WORD pathTextAttr = (WORD)(ATTR_DEFAULT);
+    // fill the menu bar line with the grey background and the path line with default background
+    for (int x = 0; x < w; ++x) {
+        int idx1 = 1 * w + x; buf[idx1].Char.AsciiChar = ' '; buf[idx1].Attributes = menuBg;
+        int idx2 = 2 * w + x; buf[idx2].Char.AsciiChar = ' '; buf[idx2].Attributes = ATTR_DEFAULT;
+    }
     BUF_PUT_TEXT(0, 1, " File  Options  View  Help", menuTextAttr);
-    char pathbar[1024]; snprintf(pathbar, sizeof(pathbar), " %s", cwd); BUF_PUT_TEXT(0, 2, pathbar, menuTextAttr);
+    char pathbar[1024]; snprintf(pathbar, sizeof(pathbar), " %s", cwd); BUF_PUT_TEXT(0, 2, pathbar, pathTextAttr);
 
-    // pane header focus attributes
-    WORD attr_dir_hdr = (cur_pane == PANE_DIR) ? ATTR_WHITE_ON_PURPLE : ATTR_HDR;
-    WORD attr_files_hdr = (cur_pane == PANE_FILES) ? ATTR_WHITE_ON_PURPLE : ATTR_HDR;
-    WORD attr_main_hdr = (cur_pane == PANE_MAIN) ? ATTR_WHITE_ON_PURPLE : ATTR_HDR;
-    WORD attr_tasks_hdr = (cur_pane == PANE_TASKS) ? ATTR_WHITE_ON_PURPLE : ATTR_HDR;
+    // pane header attributes: use white text on blue background and fill the whole header area with blue
+    WORD attr_dir_hdr = ATTR_WHITE_ON_BLUE;
+    WORD attr_files_hdr = ATTR_WHITE_ON_BLUE;
+    WORD attr_main_hdr = ATTR_WHITE_ON_BLUE;
+    WORD attr_tasks_hdr = ATTR_WHITE_ON_BLUE;
 
     // Menu positions
     int menu_file_x = 1;
@@ -257,7 +268,12 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     if (dcount == 0) dir_sel = 0; else if (dir_sel >= dcount) dir_sel = dcount - 1;
     if (fcount == 0) file_sel = 0; else if (file_sel >= fcount) file_sel = fcount - 1;
 
-    // directory header and count
+    // directory header and count - fill left header area with blue background then draw text
+    for (int x = 0; x < mid_x; ++x) {
+        int idx = content_top * w + x;
+        buf[idx].Char.AsciiChar = ' ';
+        buf[idx].Attributes = ATTR_WHITE_ON_BLUE;
+    }
     BUF_PUT_TEXT(1, content_top, "Directory Tree", attr_dir_hdr);
     char cntbuf[32]; int selpos = (dcount>0)?(dir_sel+1):0; snprintf(cntbuf,sizeof(cntbuf),"%d/%d",selpos,dcount);
     int posx = mid_x - (int)strlen(cntbuf) - 1; if (posx < 0) posx = 0; BUF_PUT_TEXT(posx, content_top, cntbuf, ATTR_WHITE_ON_BLUE);
@@ -265,7 +281,7 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     int dt_y = content_top + 1; int dt_max = (mid_y - 1) - dt_y + 1; int visible_dirs = dt_max; if (visible_dirs < 0) visible_dirs = 0;
     if (dir_offset < 0) dir_offset = 0; if (dir_offset > dcount - visible_dirs) dir_offset = dcount - visible_dirs; if (dir_offset < 0) dir_offset = 0;
     for (int i = 0; i < visible_dirs && (i + dir_offset) < dcount; ++i) {
-        int idx = dir_idx[i + dir_offset]; WORD attr = (cur_pane == PANE_DIR && (i + dir_offset) == dir_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        int idx = dir_idx[i + dir_offset]; WORD attr = (cur_pane == PANE_DIR && (i + dir_offset) == dir_sel) ? (ATTR_HILITE | ATTR_DEFAULT) : ATTR_DEFAULT;
         char line[512]; snprintf(line,sizeof(line),"  [%c] %s", 'D', items[idx].name); if ((int)strlen(line) > left_w-2) line[left_w-2] = '\0'; BUF_PUT_TEXT(1, dt_y + i, line, attr);
     }
 
@@ -276,13 +292,18 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
         if (thumb_pos < dt_y) thumb_pos = dt_y; if (thumb_pos > dt_y + visible_dirs - 1) thumb_pos = dt_y + visible_dirs - 1; BUF_PUT_TEXT(col, thumb_pos, "O", ATTR_HILITE);
     }
 
-    // files header and list
+    // files header and list - fill right header area with blue background then draw text
+    for (int x = mid_x + 1; x < w; ++x) {
+        int idx = content_top * w + x;
+        buf[idx].Char.AsciiChar = ' ';
+        buf[idx].Attributes = ATTR_WHITE_ON_BLUE;
+    }
     BUF_PUT_TEXT(mid_x+2, content_top, "Files", attr_files_hdr);
     selpos = (fcount>0)?(file_sel+1):0; snprintf(cntbuf,sizeof(cntbuf),"%d/%d",selpos,fcount); posx = w - (int)strlen(cntbuf) - 1; if (posx < mid_x+2) posx = mid_x+2; BUF_PUT_TEXT(posx, content_top, cntbuf, ATTR_WHITE_ON_BLUE);
     int fl_y = content_top + 1; int fl_max = (mid_y - 1) - fl_y + 1; int visible_files = fl_max; if (visible_files < 0) visible_files = 0;
     if (file_offset < 0) file_offset = 0; if (file_offset > fcount - visible_files) file_offset = fcount - visible_files; if (file_offset < 0) file_offset = 0;
     for (int i = 0; i < visible_files && (i + file_offset) < fcount; ++i) {
-        int idx = file_idx[i + file_offset]; FileItem *it = &items[idx]; WORD attr = (cur_pane == PANE_FILES && (i + file_offset) == file_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        int idx = file_idx[i + file_offset]; FileItem *it = &items[idx]; WORD attr = (cur_pane == PANE_FILES && (i + file_offset) == file_sel) ? (ATTR_HILITE | ATTR_DEFAULT) : ATTR_DEFAULT;
         char line[1024]; char dt[64] = ""; if (it->mtime.wYear != 0) { int hour = it->mtime.wHour; int hour12 = hour % 12; if (hour12 == 0) hour12 = 12; const char *ampm = (hour >= 12) ? "PM" : "AM"; snprintf(dt, sizeof(dt), "%02d/%02d/%04d %02d:%02d %s", it->mtime.wMonth, it->mtime.wDay, it->mtime.wYear, hour12, it->mtime.wMinute, ampm); }
         char sizebuf[32] = ""; if (!it->is_dir && show_sizes) snprintf(sizebuf, sizeof(sizebuf), "%10llu", it->size);
         snprintf(line, sizeof(line), "%s %s %s", dt, sizebuf, it->name);
@@ -347,15 +368,25 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
         }
     }
 
-    // bottom panes
+    // bottom panes - fill bottom header areas with blue and draw headers
+    for (int x = 0; x < mid_x; ++x) {
+        int idx = (mid_y+1) * w + x;
+        buf[idx].Char.AsciiChar = ' ';
+        buf[idx].Attributes = ATTR_WHITE_ON_BLUE;
+    }
+    for (int x = mid_x + 1; x < w; ++x) {
+        int idx = (mid_y+1) * w + x;
+        buf[idx].Char.AsciiChar = ' ';
+        buf[idx].Attributes = ATTR_WHITE_ON_BLUE;
+    }
     BUF_PUT_TEXT(1, mid_y+1, "Main", attr_main_hdr);
     const char *main_items[] = { "Command Prompt", "Editor", "MS-DOS QBasic", "Disk Utilities" };
     int main_count = sizeof(main_items)/sizeof(main_items[0]);
-    for (int i = 0; i < bottom_h && i < main_count; ++i) { WORD attr = (cur_pane == PANE_MAIN && i == main_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE; BUF_PUT_TEXT(1, mid_y+2 + i, main_items[i], attr); }
+    for (int i = 0; i < bottom_h && i < main_count; ++i) { WORD attr = (cur_pane == PANE_MAIN && i == main_sel) ? (ATTR_HILITE | ATTR_DEFAULT) : ATTR_DEFAULT; BUF_PUT_TEXT(1, mid_y+2 + i, main_items[i], attr); }
     BUF_PUT_TEXT(mid_x+2, mid_y+1, "Active Task List", attr_tasks_hdr);
     const char *tasks[] = { "Command Prompt" };
     int tcount = 1;
-    for (int i = 0; i < bottom_h && i < tcount; ++i) { WORD attr = (cur_pane == PANE_TASKS && i == task_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE; BUF_PUT_TEXT(mid_x+2, mid_y+2 + i, tasks[i], attr); }
+    for (int i = 0; i < bottom_h && i < tcount; ++i) { WORD attr = (cur_pane == PANE_TASKS && i == task_sel) ? (ATTR_HILITE | ATTR_DEFAULT) : ATTR_DEFAULT; BUF_PUT_TEXT(mid_x+2, mid_y+2 + i, tasks[i], attr); }
 
     // status bar
     char status[1024];
