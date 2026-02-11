@@ -201,6 +201,12 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     BUF_PUT_TEXT(0, 1, " File  Options  View  Help", ATTR_WHITE_ON_BLUE);
     char pathbar[1024]; snprintf(pathbar, sizeof(pathbar), " %s", cwd); BUF_PUT_TEXT(0, 2, pathbar, ATTR_WHITE_ON_BLUE);
 
+    // pane header focus attributes
+    WORD attr_dir_hdr = (cur_pane == PANE_DIR) ? ATTR_YELLOW_ON_BLUE : ATTR_WHITE_ON_BLUE;
+    WORD attr_files_hdr = (cur_pane == PANE_FILES) ? ATTR_YELLOW_ON_BLUE : ATTR_WHITE_ON_BLUE;
+    WORD attr_main_hdr = (cur_pane == PANE_MAIN) ? ATTR_YELLOW_ON_BLUE : ATTR_WHITE_ON_BLUE;
+    WORD attr_tasks_hdr = (cur_pane == PANE_TASKS) ? ATTR_YELLOW_ON_BLUE : ATTR_WHITE_ON_BLUE;
+
     // dividers
     for (int y = content_top; y <= content_bottom; ++y) BUF_PUT_TEXT(mid_x, y, "|", ATTR_WHITE_ON_BLUE);
     for (int x = 0; x < w; ++x) BUF_PUT_TEXT(x, mid_y, "-", ATTR_WHITE_ON_BLUE);
@@ -213,7 +219,7 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     if (fcount == 0) file_sel = 0; else if (file_sel >= fcount) file_sel = fcount - 1;
 
     // directory header and count
-    BUF_PUT_TEXT(1, content_top, "Directory Tree", ATTR_WHITE_ON_BLUE);
+    BUF_PUT_TEXT(1, content_top, "Directory Tree", attr_dir_hdr);
     char cntbuf[32]; int selpos = (dcount>0)?(dir_sel+1):0; snprintf(cntbuf,sizeof(cntbuf),"%d/%d",selpos,dcount);
     int posx = mid_x - (int)strlen(cntbuf) - 1; if (posx < 0) posx = 0; BUF_PUT_TEXT(posx, content_top, cntbuf, ATTR_WHITE_ON_BLUE);
 
@@ -232,7 +238,7 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     }
 
     // files header and list
-    BUF_PUT_TEXT(mid_x+2, content_top, "Files", ATTR_WHITE_ON_BLUE);
+    BUF_PUT_TEXT(mid_x+2, content_top, "Files", attr_files_hdr);
     selpos = (fcount>0)?(file_sel+1):0; snprintf(cntbuf,sizeof(cntbuf),"%d/%d",selpos,fcount); posx = w - (int)strlen(cntbuf) - 1; if (posx < mid_x+2) posx = mid_x+2; BUF_PUT_TEXT(posx, content_top, cntbuf, ATTR_WHITE_ON_BLUE);
     int fl_y = content_top + 1; int fl_max = (mid_y - 1) - fl_y + 1; int visible_files = fl_max; if (visible_files < 0) visible_files = 0;
     if (file_offset < 0) file_offset = 0; if (file_offset > fcount - visible_files) file_offset = fcount - visible_files; if (file_offset < 0) file_offset = 0;
@@ -251,11 +257,11 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     }
 
     // bottom panes
-    BUF_PUT_TEXT(1, mid_y+1, "Main", ATTR_WHITE_ON_BLUE);
+    BUF_PUT_TEXT(1, mid_y+1, "Main", attr_main_hdr);
     const char *main_items[] = { "Command Prompt", "Editor", "MS-DOS QBasic", "Disk Utilities" };
     int main_count = sizeof(main_items)/sizeof(main_items[0]);
     for (int i = 0; i < bottom_h && i < main_count; ++i) { WORD attr = (cur_pane == PANE_MAIN && i == main_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE; BUF_PUT_TEXT(1, mid_y+2 + i, main_items[i], attr); }
-    BUF_PUT_TEXT(mid_x+2, mid_y+1, "Active Task List", ATTR_WHITE_ON_BLUE);
+    BUF_PUT_TEXT(mid_x+2, mid_y+1, "Active Task List", attr_tasks_hdr);
     const char *tasks[] = { "Command Prompt" };
     int tcount = 1;
     for (int i = 0; i < bottom_h && i < tcount; ++i) { WORD attr = (cur_pane == PANE_TASKS && i == task_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE; BUF_PUT_TEXT(mid_x+2, mid_y+2 + i, tasks[i], attr); }
@@ -447,6 +453,7 @@ int main(void) {
             COORD size = get_console_size(); int w = size.X, h = size.Y;
             int content_top = 3; int content_bottom = h - 2; int content_h = content_bottom - content_top + 1;
             int left_w = w / 3; int mid_x = left_w; int top_h = content_h / 2;
+            int bottom_h = content_h - top_h - 1;
             int dt_y = content_top + 1; int fl_y = content_top + 1;
             int visible_dirs = (content_top + top_h - 1) - dt_y + 1; if (visible_dirs < 0) visible_dirs = 0;
             int visible_files = (content_top + top_h - 1) - fl_y + 1; if (visible_files < 0) visible_files = 0;
@@ -462,10 +469,35 @@ int main(void) {
                 // left click
                 if (my >= dt_y && my < dt_y + visible_dirs && mx < mid_x) {
                     int clicked = dir_offset + (my - dt_y);
-                    if (clicked >= 0 && clicked < dcount_local) dir_sel = clicked;
+                    if (clicked >= 0 && clicked < dcount_local) {
+                        dir_sel = clicked;
+                        cur_pane = PANE_DIR; /* focus pane on click */
+                    }
                 } else if (my >= fl_y && my < fl_y + visible_files && mx >= mid_x+2) {
                     int clicked = file_offset + (my - fl_y);
-                    if (clicked >= 0 && clicked < fcount_local) file_sel = clicked;
+                    if (clicked >= 0 && clicked < fcount_local) {
+                        file_sel = clicked;
+                        cur_pane = PANE_FILES; /* focus pane on click */
+                    }
+                } else {
+                    /* bottom panes - set focus if clicked */
+                    int mid_y_loc = content_top + top_h;
+                    if (my >= mid_y_loc + 1 && my <= content_bottom) {
+                        if (mx < mid_x) {
+                            cur_pane = PANE_MAIN;
+                            int clicked = my - (mid_y_loc + 2);
+                            if (clicked < 0) clicked = 0;
+                            if (clicked > bottom_h-1) clicked = bottom_h-1;
+                            /* clamp */
+                            if (clicked >= 0) main_sel = clicked;
+                        } else {
+                            cur_pane = PANE_TASKS;
+                            int clicked = my - (mid_y_loc + 2);
+                            if (clicked < 0) clicked = 0;
+                            if (clicked > bottom_h-1) clicked = bottom_h-1;
+                            if (clicked >= 0) task_sel = clicked;
+                        }
+                    }
                 }
                 draw_ui(cwd, items, count, 0);
             } else if ((me.dwEventFlags & DOUBLE_CLICK) && (me.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)) {
@@ -475,11 +507,16 @@ int main(void) {
                     if (clicked >= 0 && clicked < dcount_local) {
                         int sel_idx = dir_idx_local[clicked];
                         const char *dname = items[sel_idx].name;
+                        /* save selection for current path before changing */
+                        save_selection_for_path(cwd, dir_sel, file_sel, dir_offset, file_offset);
                         if (strcmp(dname, "..") == 0) SetCurrentDirectoryA("..");
                         else { char newpath[MAX_PATH]; snprintf(newpath, sizeof(newpath), "%s\\%s", cwd, dname); SetCurrentDirectoryA(newpath); }
                         GetCurrentDirectoryA(MAX_PATH, cwd);
                         load_directory(cwd, items, &count);
-                        dir_sel = 0; file_sel = 0; dir_offset = 0; file_offset = 0;
+                        /* restore selection for new cwd if any */
+                        int dcount_new = 0, fcount_new = 0;
+                        for (int i = 0; i < count; ++i) if (items[i].is_dir) dcount_new++; else fcount_new++;
+                        restore_selection_for_path(cwd, dcount_new, fcount_new);
                     }
                 }
                 draw_ui(cwd, items, count, 0);
