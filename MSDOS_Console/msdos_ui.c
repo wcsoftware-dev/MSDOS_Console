@@ -224,9 +224,15 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
 
     /* menu is drawn after the main content so it appears above panes */
 
-    // dividers
-    for (int y = content_top; y <= content_bottom; ++y) BUF_PUT_TEXT(mid_x, y, "|", ATTR_WHITE_ON_BLUE);
-    for (int x = 0; x < w; ++x) BUF_PUT_TEXT(x, mid_y, "-", ATTR_WHITE_ON_BLUE);
+    // dividers (use box-drawing characters)
+    char ver_ch[2] = { (char)179, 0 }; /* ? */
+    char hor_ch[2] = { (char)196, 0 }; /* ? */
+    char cross_ch[2] = { (char)197, 0 }; /* ? */
+    for (int y = content_top; y <= content_bottom; ++y) BUF_PUT_TEXT(mid_x, y, ver_ch, ATTR_WHITE_ON_BLUE);
+    for (int x = 0; x < w; ++x) {
+        if (x == mid_x) BUF_PUT_TEXT(x, mid_y, cross_ch, ATTR_WHITE_ON_BLUE);
+        else BUF_PUT_TEXT(x, mid_y, hor_ch, ATTR_WHITE_ON_BLUE);
+    }
 
     // Build lists
     int dir_idx[MAX_ITEMS]; int file_idx[MAX_ITEMS]; int dcount = 0, fcount = 0;
@@ -297,14 +303,20 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
                 buf[idx].Attributes = menuBg;
             }
         }
-        /* draw border */
-        BUF_PUT_TEXT(left, top, "+", borderAttr);
-        BUF_PUT_TEXT(right, top, "+", borderAttr);
-        BUF_PUT_TEXT(left, bottom, "+", borderAttr);
-        BUF_PUT_TEXT(right, bottom, "+", borderAttr);
-        for (int x = left + 1; x < right; ++x) BUF_PUT_TEXT(x, top, "-", borderAttr);
-        for (int x = left + 1; x < right; ++x) BUF_PUT_TEXT(x, bottom, "-", borderAttr);
-        for (int y = top + 1; y < bottom; ++y) { BUF_PUT_TEXT(left, y, "|", borderAttr); BUF_PUT_TEXT(right, y, "|", borderAttr); }
+        /* draw border using box-drawing characters (CP437) */
+        char tl[2] = { (char)201, 0 }; /* ? */
+        char tr[2] = { (char)187, 0 }; /* ? */
+        char bl[2] = { (char)200, 0 }; /* ? */
+        char br[2] = { (char)188, 0 }; /* ? */
+        char hor[2] = { (char)205, 0 }; /* ? */
+        char ver[2] = { (char)186, 0 }; /* ? */
+        BUF_PUT_TEXT(left, top, tl, borderAttr);
+        BUF_PUT_TEXT(right, top, tr, borderAttr);
+        BUF_PUT_TEXT(left, bottom, bl, borderAttr);
+        BUF_PUT_TEXT(right, bottom, br, borderAttr);
+        for (int x = left + 1; x < right; ++x) BUF_PUT_TEXT(x, top, hor, borderAttr);
+        for (int x = left + 1; x < right; ++x) BUF_PUT_TEXT(x, bottom, hor, borderAttr);
+        for (int y = top + 1; y < bottom; ++y) { BUF_PUT_TEXT(left, y, ver, borderAttr); BUF_PUT_TEXT(right, y, ver, borderAttr); }
         /* draw items */
         for (int mi = 0; mi < mcount; ++mi) {
             int y = top + 1 + mi;
