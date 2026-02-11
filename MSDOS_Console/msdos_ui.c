@@ -34,6 +34,8 @@ enum {
     ATTR_BG_BLUE = BACKGROUND_BLUE,
     ATTR_WHITE_ON_BLUE = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | ATTR_BG_BLUE,
     ATTR_YELLOW_ON_BLUE = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY | ATTR_BG_BLUE,
+    /* Bright green track on blue background for scrollbars */
+    ATTR_SCROLL = FOREGROUND_GREEN | FOREGROUND_INTENSITY | ATTR_BG_BLUE,
     ATTR_STATUS = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | ATTR_BG_BLUE,
     /* Black text on bright yellow background for selection (classic DOS highlight) */
     ATTR_HILITE = BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_INTENSITY
@@ -164,6 +166,15 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
 
     // Left-top: Directory Tree (content_top .. mid_y-1, x 0..mid_x-1)
     put_text(1, content_top, "Directory Tree", ATTR_WHITE_ON_BLUE);
+    // show selection/total for dirs
+    {
+        char cntbuf[32];
+        int selpos = (dcount > 0) ? (dir_sel + 1) : 0;
+        snprintf(cntbuf, sizeof(cntbuf), "%d/%d", selpos, dcount);
+        int posx = mid_x - (int)strlen(cntbuf) - 1;
+        if (posx < 0) posx = 0;
+        put_text(posx, content_top, cntbuf, ATTR_WHITE_ON_BLUE);
+    }
     int dt_y = content_top + 1;
     int dt_max = (mid_y - 1) - dt_y + 1;
     // apply dir_offset for scrolling
@@ -174,7 +185,7 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
     if (dir_offset < 0) dir_offset = 0;
     for (int i = 0; i < visible_dirs && (i + dir_offset) < dcount; ++i) {
         int idx = dir_idx[i + dir_offset];
-        WORD attr = (cur_pane == PANE_DIR && i == dir_sel - dir_offset) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
+        WORD attr = (cur_pane == PANE_DIR && (i + dir_offset) == dir_sel) ? ATTR_HILITE : ATTR_WHITE_ON_BLUE;
         char line[512];
         snprintf(line, sizeof(line), "  [%c] %s", 'D', items[idx].name);
         // truncate to left width
@@ -182,8 +193,29 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
         put_text(1, dt_y + i, line, attr);
     }
 
+    // draw left scrollbar indicator
+    if (dcount > visible_dirs && visible_dirs > 0) {
+        int col = mid_x - 1;
+        // draw scrollbar track (use green on blue so track stands out)
+        for (int y = dt_y; y < dt_y + visible_dirs; ++y) put_text(col, y, "|", ATTR_SCROLL);
+        int thumb_pos = dt_y;
+        if (dcount > 1) thumb_pos = dt_y + (dir_offset * (visible_dirs - 1)) / (dcount - 1);
+        if (thumb_pos < dt_y) thumb_pos = dt_y;
+        if (thumb_pos > dt_y + visible_dirs - 1) thumb_pos = dt_y + visible_dirs - 1;
+        put_text(col, thumb_pos, "O", ATTR_HILITE);
+    }
+
     // Right-top: File list (content_top .. mid_y-1, x mid_x+1 .. w-1)
     put_text(mid_x+2, content_top, "Files", ATTR_WHITE_ON_BLUE);
+    // show selection/total for files
+    {
+        char cntbuf[32];
+        int selpos = (fcount > 0) ? (file_sel + 1) : 0;
+        snprintf(cntbuf, sizeof(cntbuf), "%d/%d", selpos, fcount);
+        int posx = w - (int)strlen(cntbuf) - 1;
+        if (posx < mid_x+2) posx = mid_x+2;
+        put_text(posx, content_top, cntbuf, ATTR_WHITE_ON_BLUE);
+    }
     int fl_y = content_top + 1;
     int fl_max = (mid_y - 1) - fl_y + 1;
     int visible_files = fl_max;
@@ -212,6 +244,17 @@ static void draw_ui(const char* cwd, FileItem* items, int count, int sel) {
         int available = w - (mid_x + 3);
         if ((int)strlen(line) > available) line[available] = '\0';
         put_text(mid_x+2, fl_y + i, line, attr);
+    }
+
+    // draw right scrollbar indicator
+    if (fcount > visible_files && visible_files > 0) {
+        int col = w - 1;
+        for (int y = fl_y; y < fl_y + visible_files; ++y) put_text(col, y, "|", ATTR_SCROLL);
+        int thumb_pos = fl_y;
+        if (fcount > 1) thumb_pos = fl_y + (file_offset * (visible_files - 1)) / (fcount - 1);
+        if (thumb_pos < fl_y) thumb_pos = fl_y;
+        if (thumb_pos > fl_y + visible_files - 1) thumb_pos = fl_y + visible_files - 1;
+        put_text(col, thumb_pos, "O", ATTR_HILITE);
     }
 
     // Bottom-left: Main (content mid_y+1 .. content_bottom)

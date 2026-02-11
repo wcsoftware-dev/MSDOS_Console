@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="MSDOS_Console/MSDOS_Console.vcxproj" />
+  <Project Path="MSDOS_Console/MSDOS_Console.vcxproj" Id="e485a67b-d027-462f-9c0b-5130ef2b31db" />
 </Solution>
